@@ -143,6 +143,30 @@ export function transition(prev: GameState, p1Mask: number, p2Mask: number): Gam
   s.p1.x = clamp(s.p1.x + p1Move, 0, WIDTH - s.p1.w);
   s.p2.x = clamp(s.p2.x + p2Move, 0, WIDTH - s.p2.w);
 
+  // Solid bodies: fighters cannot walk through each other. Resolve any overlap
+  // by separating them to just-touching around their midpoint, then clamp to
+  // walls. This keeps them on opposite sides so facing/attacks stay correct.
+  {
+    const fw = s.p1.w;
+    const leftIsP1 = s.p1.x <= s.p2.x;
+    const left = leftIsP1 ? s.p1 : s.p2;
+    const right = leftIsP1 ? s.p2 : s.p1;
+    if (right.x < left.x + fw) {
+      const center = (left.x + right.x + fw) / 2;
+      right.x = center;
+      left.x = center - fw;
+      if (left.x < 0) {
+        left.x = 0;
+        right.x = fw;
+      }
+      const maxRight = WIDTH - fw;
+      if (right.x > maxRight) {
+        right.x = maxRight;
+        left.x = maxRight - fw;
+      }
+    }
+  }
+
   s.p1.facing = s.p1.x <= s.p2.x ? 1 : -1;
   s.p2.facing = s.p2.x >= s.p1.x ? -1 : 1;
 

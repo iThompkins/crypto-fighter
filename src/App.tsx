@@ -688,7 +688,22 @@ export default function App() {
 
   async function copy(text: string) {
     try {
-      await navigator.clipboard.writeText(text);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      // Fallback for non-secure contexts (plain http): the Clipboard API is
+      // unavailable, so use a temporary textarea + execCommand.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (!ok) throw new Error("copy command rejected");
     } catch (e) {
       setLastError(`Clipboard copy failed: ${String(e)}`);
     }
