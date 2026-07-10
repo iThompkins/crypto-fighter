@@ -19,7 +19,9 @@ const ATTACK_H = 14;
 const ATTACK_REACH = 22;
 const DAMAGE = 1;
 const MAX_HP = 7;
-const INPUT = { LEFT: 1, RIGHT: 2, ATTACK: 4 };
+const INPUT = { LEFT: 1, RIGHT: 2, ATTACK: 4, UP: 8 };
+const JUMP_VELOCITY = 22;
+const GRAVITY = 2;
 const ZERO_HASH = "0x" + "00".repeat(32);
 
 function strip0x(hex) {
@@ -123,6 +125,7 @@ function decodeInputMask(mask) {
     left: !!(mask & INPUT.LEFT),
     right: !!(mask & INPUT.RIGHT),
     attack: !!(mask & INPUT.ATTACK),
+    up: !!(mask & INPUT.UP),
   };
 }
 
@@ -145,8 +148,8 @@ function initialState() {
     timerFramesLeft: ROUND_FRAMES,
     roundOver: false,
     winner: null,
-    p1: { x: 120, y: FLOOR_Y - FIGHTER_H, w: FIGHTER_W, h: FIGHTER_H, hp: MAX_HP, facing: 1, attackCooldown: 0, attackActive: 0 },
-    p2: { x: WIDTH - 120 - FIGHTER_W, y: FLOOR_Y - FIGHTER_H, w: FIGHTER_W, h: FIGHTER_H, hp: MAX_HP, facing: -1, attackCooldown: 0, attackActive: 0 },
+    p1: { x: 120, y: FLOOR_Y - FIGHTER_H, w: FIGHTER_W, h: FIGHTER_H, hp: MAX_HP, facing: 1, attackCooldown: 0, attackActive: 0, vy: 0 },
+    p2: { x: WIDTH - 120 - FIGHTER_W, y: FLOOR_Y - FIGHTER_H, w: FIGHTER_W, h: FIGHTER_H, hp: MAX_HP, facing: -1, attackCooldown: 0, attackActive: 0, vy: 0 },
   };
 }
 
@@ -159,9 +162,6 @@ function transition(prev, p1Mask, p2Mask) {
   const p1Input = decodeInputMask(p1Mask);
   const p2Input = decodeInputMask(p2Mask);
 
-  s.p1.facing = s.p1.x <= s.p2.x ? 1 : -1;
-  s.p2.facing = s.p2.x >= s.p1.x ? -1 : 1;
-
   if (s.p1.attackCooldown > 0) s.p1.attackCooldown -= 1;
   if (s.p2.attackCooldown > 0) s.p2.attackCooldown -= 1;
   if (s.p1.attackActive > 0) s.p1.attackActive -= 1;
@@ -173,12 +173,23 @@ function transition(prev, p1Mask, p2Mask) {
   s.p1.x = clamp(s.p1.x + p1Move, 0, WIDTH - s.p1.w);
   s.p2.x = clamp(s.p2.x + p2Move, 0, WIDTH - s.p2.w);
 
+  const groundY = FLOOR_Y - s.p1.h;
+  if (p1Input.up && s.p1.y >= groundY) s.p1.vy = -JUMP_VELOCITY;
+  if (p2Input.up && s.p2.y >= groundY) s.p2.vy = -JUMP_VELOCITY;
+  s.p1.vy += GRAVITY;
+  s.p2.vy += GRAVITY;
+  s.p1.y += s.p1.vy;
+  s.p2.y += s.p2.vy;
+  if (s.p1.y >= groundY) { s.p1.y = groundY; s.p1.vy = 0; }
+  if (s.p2.y >= groundY) { s.p2.y = groundY; s.p2.vy = 0; }
+
   {
     const fw = s.p1.w;
+    const vOverlap = s.p1.y < s.p2.y + s.p2.h && s.p1.y + s.p1.h > s.p2.y;
     const leftIsP1 = s.p1.x <= s.p2.x;
     const left = leftIsP1 ? s.p1 : s.p2;
     const right = leftIsP1 ? s.p2 : s.p1;
-    if (right.x < left.x + fw) {
+    if (vOverlap && right.x < left.x + fw) {
       const center = (left.x + right.x + fw) / 2;
       right.x = center;
       left.x = center - fw;
@@ -194,8 +205,10 @@ function transition(prev, p1Mask, p2Mask) {
     }
   }
 
-  s.p1.facing = s.p1.x <= s.p2.x ? 1 : -1;
-  s.p2.facing = s.p2.x >= s.p1.x ? -1 : 1;
+  if (p1Move > 0) s.p1.facing = 1;
+  else if (p1Move < 0) s.p1.facing = -1;
+  if (p2Move > 0) s.p2.facing = 1;
+  else if (p2Move < 0) s.p2.facing = -1;
 
   if (p1Input.attack && s.p1.attackCooldown === 0 && s.p1.attackActive === 0) {
     s.p1.attackActive = ATTACK_ACTIVE_FRAMES;

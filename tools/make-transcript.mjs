@@ -13,7 +13,8 @@ secp.etc.hmacSha256Sync = (k, ...m) => hmac(sha256, k, secp.etc.concatBytes(...m
 
 const FPS = 30, ROUND_FRAMES = 300, WIDTH = 720, FLOOR_Y = 260;
 const FW = 28, FH = 56, SPEED = 5, ATK_ACTIVE = 4, ATK_CD = 10, ATK_W = 18, ATK_H = 14, REACH = 22, DMG = 1, MAX_HP = 7;
-const INPUT = { LEFT: 1, RIGHT: 2, ATTACK: 4 };
+const INPUT = { LEFT: 1, RIGHT: 2, ATTACK: 4, UP: 8 };
+const JUMP_VELOCITY = 22, GRAVITY = 2;
 const ZERO32 = "0x" + "00".repeat(32);
 
 const strip = (h) => (h.startsWith("0x") ? h.slice(2) : h);
@@ -37,10 +38,10 @@ function sign(priv, digest) {
 }
 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-const decode = (m) => ({ left: !!(m & INPUT.LEFT), right: !!(m & INPUT.RIGHT), attack: !!(m & INPUT.ATTACK) });
+const decode = (m) => ({ left: !!(m & INPUT.LEFT), right: !!(m & INPUT.RIGHT), attack: !!(m & INPUT.ATTACK), up: !!(m & INPUT.UP) });
 function atkRect(f) { if (f.attackActive <= 0) return null; const y = f.y + Math.floor(f.h / 2) - Math.floor(ATK_H / 2); return f.facing === 1 ? { x: f.x + f.w, y, w: ATK_W + REACH, h: ATK_H } : { x: f.x - (ATK_W + REACH), y, w: ATK_W + REACH, h: ATK_H }; }
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-function initial() { return { frame: 0, timerFramesLeft: ROUND_FRAMES, roundOver: false, winner: null, p1: { x: 120, y: FLOOR_Y - FH, w: FW, h: FH, hp: MAX_HP, facing: 1, attackCooldown: 0, attackActive: 0 }, p2: { x: WIDTH - 120 - FW, y: FLOOR_Y - FH, w: FW, h: FH, hp: MAX_HP, facing: -1, attackCooldown: 0, attackActive: 0 } }; }
+function initial() { return { frame: 0, timerFramesLeft: ROUND_FRAMES, roundOver: false, winner: null, p1: { x: 120, y: FLOOR_Y - FH, w: FW, h: FH, hp: MAX_HP, facing: 1, attackCooldown: 0, attackActive: 0, vy: 0 }, p2: { x: WIDTH - 120 - FW, y: FLOOR_Y - FH, w: FW, h: FH, hp: MAX_HP, facing: -1, attackCooldown: 0, attackActive: 0, vy: 0 } }; }
 function transition(prev, m1, m2) {
   if (prev.roundOver) return prev;
   const s = JSON.parse(JSON.stringify(prev)); s.frame++; s.timerFramesLeft = Math.max(0, s.timerFramesLeft - 1);
@@ -49,12 +50,20 @@ function transition(prev, m1, m2) {
   if (s.p1.attackActive > 0) s.p1.attackActive--; if (s.p2.attackActive > 0) s.p2.attackActive--;
   s.p1.x = clamp(s.p1.x + (i1.left ? -SPEED : 0) + (i1.right ? SPEED : 0), 0, WIDTH - s.p1.w);
   s.p2.x = clamp(s.p2.x + (i2.left ? -SPEED : 0) + (i2.right ? SPEED : 0), 0, WIDTH - s.p2.w);
+  const groundY = FLOOR_Y - s.p1.h;
+  if (i1.up && s.p1.y >= groundY) s.p1.vy = -JUMP_VELOCITY;
+  if (i2.up && s.p2.y >= groundY) s.p2.vy = -JUMP_VELOCITY;
+  s.p1.vy += GRAVITY; s.p2.vy += GRAVITY;
+  s.p1.y += s.p1.vy; s.p2.y += s.p2.vy;
+  if (s.p1.y >= groundY) { s.p1.y = groundY; s.p1.vy = 0; }
+  if (s.p2.y >= groundY) { s.p2.y = groundY; s.p2.vy = 0; }
   {
     const fw = s.p1.w;
+    const vOverlap = s.p1.y < s.p2.y + s.p2.h && s.p1.y + s.p1.h > s.p2.y;
     const leftIsP1 = s.p1.x <= s.p2.x;
     const left = leftIsP1 ? s.p1 : s.p2;
     const right = leftIsP1 ? s.p2 : s.p1;
-    if (right.x < left.x + fw) {
+    if (vOverlap && right.x < left.x + fw) {
       const center = (left.x + right.x + fw) / 2;
       right.x = center; left.x = center - fw;
       if (left.x < 0) { left.x = 0; right.x = fw; }
@@ -62,7 +71,8 @@ function transition(prev, m1, m2) {
       if (right.x > maxRight) { right.x = maxRight; left.x = maxRight - fw; }
     }
   }
-  s.p1.facing = s.p1.x <= s.p2.x ? 1 : -1; s.p2.facing = s.p2.x >= s.p1.x ? -1 : 1;
+  if (i1.right && !i1.left) s.p1.facing = 1; else if (i1.left && !i1.right) s.p1.facing = -1;
+  if (i2.right && !i2.left) s.p2.facing = 1; else if (i2.left && !i2.right) s.p2.facing = -1;
   if (i1.attack && s.p1.attackCooldown === 0 && s.p1.attackActive === 0) { s.p1.attackActive = ATK_ACTIVE; s.p1.attackCooldown = ATK_CD; }
   if (i2.attack && s.p2.attackCooldown === 0 && s.p2.attackActive === 0) { s.p2.attackActive = ATK_ACTIVE; s.p2.attackCooldown = ATK_CD; }
   const a1 = atkRect(s.p1), a2 = atkRect(s.p2);

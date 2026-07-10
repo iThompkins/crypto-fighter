@@ -9,6 +9,7 @@ export type Fighter = {
   facing: 1 | -1;
   attackCooldown: number;
   attackActive: number;
+  vy: number;
 };
 
 export type GameState = {

@@ -10,7 +10,7 @@ import { verifyTranscript } from "./verifier";
 import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
 // Keys the game consumes; preventDefault so arrows/space don't scroll the page.
-const GAME_KEYS = new Set(["a", "d", "arrowleft", "arrowright", " ", "f", "j", "k", "/"]);
+const GAME_KEYS = new Set(["a", "d", "w", "arrowleft", "arrowright", "arrowup", " ", "f", "j", "k", "/"]);
 
 export default function App() {
   const [state, setState] = useState<GameState>(initialState());
@@ -393,6 +393,7 @@ export default function App() {
     return encodeInputMask({
       left: !!(k["a"] || k["arrowleft"]),
       right: !!(k["d"] || k["arrowright"]),
+      up: !!(k["w"] || k["arrowup"]),
       attack: !!(k[" "] || k["f"] || k["j"] || k["k"] || k["/"]),
     });
   }, []);
@@ -819,7 +820,7 @@ export default function App() {
               </button>
             </div>
             <div style={styles.sub}>
-              Controls — Move: A/D or ←/→ · Attack: Space (or F/J/K)
+              Controls — Move: A/D or ←/→ · Jump: W/↑ · Attack: Space (or F/J/K)
             </div>
 
             <div style={styles.row}>
@@ -889,7 +890,7 @@ export default function App() {
           <section style={styles.grid2}>
             <PlayerCard
               title="Player 1"
-              controls="A/D · Space"
+              controls="A/D · W · Space"
               hp={displayState.p1.hp}
               maxHp={MAX_HP}
               address={localSlot === 1 ? wallet?.address ?? "generating..." : remoteWalletAddress || "waiting..."}
@@ -898,7 +899,7 @@ export default function App() {
             />
             <PlayerCard
               title="Player 2"
-              controls="A/D · Space"
+              controls="A/D · W · Space"
               hp={displayState.p2.hp}
               maxHp={MAX_HP}
               address={localSlot === 2 ? wallet?.address ?? "generating..." : remoteWalletAddress || "waiting..."}
