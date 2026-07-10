@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Peer, { type DataConnection } from "peerjs";
 import { createSessionWallet, hashFrameFields, hashJson, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
-import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
+import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, INPUT_DELAY, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
 import { short } from "./format";
 import { arena, connectWallet, outcomeFromWinner, rulesHash, stakeWei } from "./chain";
 import type { Signer } from "ethers";
@@ -57,10 +57,25 @@ export default function App() {
   const intervalRef = useRef<number | null>(null);
   const keyState = useRef<Record<string, boolean>>({});
   const pendingInputsRef = useRef<Record<number, Partial<Record<PlayerSlot, SignedInputPacket>>>>({});
+  // Canonical (last-advanced) packet hashes per slot, used for on-chain claim heads.
   const packetHeadsRef = useRef<{ 1: string; 2: string }>({ 1: ZERO32, 2: ZERO32 });
   const frameHeadRef = useRef(ZERO32);
-  const sentFramesRef = useRef<Set<number>>(new Set());
+  // Delay-based netcode bookkeeping: per-frame packet hashes (local + remote) and
+  // the next frame we still owe an input for (kept INPUT_DELAY ahead of the sim).
+  const myHashByFrameRef = useRef<Record<number, string>>({});
+  const oppHashByFrameRef = useRef<Record<number, string>>({});
+  const nextSendFrameRef = useRef(1);
   const tickInFlightRef = useRef(false);
+
+  function primeNetcode() {
+    pendingInputsRef.current = {};
+    packetHeadsRef.current = { 1: ZERO32, 2: ZERO32 };
+    frameHeadRef.current = ZERO32;
+    myHashByFrameRef.current = {};
+    oppHashByFrameRef.current = {};
+    nextSendFrameRef.current = 1;
+    advTimesRef.current = [];
+  }
 
   // Perf instrumentation: game advance rate + crypto op timing.
   const advTimesRef = useRef<number[]>([]);
@@ -246,7 +261,6 @@ export default function App() {
     const nextState = transition(stateRef.current, p1Packet.inputMask, p2Packet.inputMask);
 
     delete pendingInputsRef.current[frame];
-    sentFramesRef.current.delete(frame);
     setCanonicalFrames((prev) => [...prev, canonical]);
     stateRef.current = nextState;
     setState(nextState);
@@ -282,6 +296,8 @@ export default function App() {
 
     if (msg.type === "START_MATCH") {
       updateMatchId(msg.matchId);
+      primeNetcode();
+      setState(initialState());
       log(`remote started match: ${msg.matchId}`);
       setIsRunning(true);
       return;
@@ -314,7 +330,7 @@ export default function App() {
     if (packet.player !== expectedRemoteSlot) return `expected P${expectedRemoteSlot}, got P${packet.player}`;
     if (packet.matchId !== matchIdRef.current) return `wrong match context ${packet.matchId}`;
     if (packet.frame <= currentState.frame) return `stale frame ${packet.frame}`;
-    if (packet.frame > currentState.frame + 1) return `future frame ${packet.frame} exceeds one-frame window`;
+    if (packet.frame > currentState.frame + INPUT_DELAY + 2) return `future frame ${packet.frame} beyond delay window`;
     if (remoteWalletPubKeyRef.current && packet.publicKey !== remoteWalletPubKeyRef.current) return "public key changed after HELLO";
 
     const hash = hashPacketFields(
@@ -327,12 +343,17 @@ export default function App() {
     );
     if (hash !== packet.hash) return "packet hash does not match canonical payload";
 
-    if (packet.prevSelfHash !== packetHeadsRef.current[packet.player]) {
+    // Opponent self-chains to their own previous frame (ordered delivery).
+    const expectedSelf = packet.frame > 1 ? oppHashByFrameRef.current[packet.frame - 1] : ZERO32;
+    if (packet.prevSelfHash !== expectedSelf) {
       return `broken self hash chain for P${packet.player}`;
     }
 
-    if (packet.prevOppHash !== packetHeadsRef.current[currentSlot]) {
-      return `broken opponent hash link for P${packet.player}`;
+    // ...and acknowledges OUR packet from INPUT_DELAY frames ago.
+    const ackFrame = packet.frame - INPUT_DELAY;
+    const expectedOpp = ackFrame >= 1 ? myHashByFrameRef.current[ackFrame] : ZERO32;
+    if (packet.prevOppHash !== expectedOpp) {
+      return `broken opponent ack for P${packet.player}`;
     }
 
     const existing = pendingInputsRef.current[packet.frame]?.[packet.player];
@@ -351,10 +372,12 @@ export default function App() {
     const frame = packet.frame;
     if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
     pendingInputsRef.current[frame][packet.player] = packet;
+    oppHashByFrameRef.current[frame] = packet.hash;
 
     setPackets((prev) => [...prev, packet]);
 
-    await maybeAdvanceFrame(frame);
+    // Try to advance the next needed frame (the arrival may complete its pair).
+    await maybeAdvanceFrame(stateRef.current.frame + 1);
   }
 
   const currentLocalInputMask = useCallback((slot = localSlotRef.current) => {
@@ -377,8 +400,11 @@ export default function App() {
     if (!wallet) throw new Error("Missing wallet");
 
     const slot = localSlotRef.current;
-    const prevSelfHash = packetHeadsRef.current[slot];
-    const prevOppHash = packetHeadsRef.current[slot === 1 ? 2 : 1];
+    // Self-chain to our own previous frame; acknowledge the opponent's packet
+    // from INPUT_DELAY frames ago (blind-commit window == INPUT_DELAY).
+    const prevSelfHash = frame > 1 ? myHashByFrameRef.current[frame - 1] ?? ZERO32 : ZERO32;
+    const ackFrame = frame - INPUT_DELAY;
+    const prevOppHash = ackFrame >= 1 ? oppHashByFrameRef.current[ackFrame] ?? ZERO32 : ZERO32;
 
     const hash = hashPacketFields(
       matchIdRef.current,
@@ -393,6 +419,7 @@ export default function App() {
     const signature = await signDigest(wallet.privateKey, hash);
     const sDt = performance.now() - sStart;
     signMsRef.current = signMsRef.current === 0 ? sDt : signMsRef.current * 0.8 + sDt * 0.2;
+    myHashByFrameRef.current[frame] = hash;
 
     return {
       matchId: matchIdRef.current,
@@ -414,31 +441,32 @@ export default function App() {
     try {
       if (!connRef.current || !wallet || stateRef.current.roundOver) return;
 
-      const nextFrame = stateRef.current.frame + 1;
+      const slot = localSlotRef.current;
+      // Send our inputs up to INPUT_DELAY frames ahead of the sim, so the
+      // opponent's matching packet has already had time to arrive.
+      const horizon = stateRef.current.frame + INPUT_DELAY;
+      while (nextSendFrameRef.current <= horizon) {
+        const frame = nextSendFrameRef.current;
+        // Can only sign frame F once we hold the opponent packet it acknowledges
+        // (F - INPUT_DELAY). If not yet received, wait (this is the only stall).
+        const ackFrame = frame - INPUT_DELAY;
+        if (ackFrame >= 1 && oppHashByFrameRef.current[ackFrame] === undefined) break;
 
-      if (sentFramesRef.current.has(nextFrame)) {
-        await maybeAdvanceFrame(nextFrame);
-        return;
+        const inputMask = currentLocalInputMask(slot);
+        const packet = await buildSignedPacket(frame, inputMask);
+        if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
+        pendingInputsRef.current[frame][slot] = packet;
+        setPackets((prev) => [...prev, packet]);
+        connRef.current.send({ type: "INPUT_PACKET", packet } satisfies NetEnvelope);
+        nextSendFrameRef.current = frame + 1;
       }
 
-      const slot = localSlotRef.current;
-      const inputMask = currentLocalInputMask(slot);
-      const packet = await buildSignedPacket(nextFrame, inputMask);
-
-      if (!pendingInputsRef.current[nextFrame]) pendingInputsRef.current[nextFrame] = {};
-      pendingInputsRef.current[nextFrame][slot] = packet;
-
-      sentFramesRef.current.add(nextFrame);
-
-      setPackets((prev) => [...prev, packet]);
-      connRef.current.send({ type: "INPUT_PACKET", packet } satisfies NetEnvelope);
-      log(`frame ${nextFrame}: sent local packet`);
-
-      await maybeAdvanceFrame(nextFrame);
+      // Advance at most one canonical frame per tick for a steady 30fps display.
+      await maybeAdvanceFrame(stateRef.current.frame + 1);
     } finally {
       tickInFlightRef.current = false;
     }
-  }, [buildSignedPacket, currentLocalInputMask, log, maybeAdvanceFrame, wallet]);
+  }, [buildSignedPacket, currentLocalInputMask, maybeAdvanceFrame, wallet]);
 
 
 
@@ -539,10 +567,7 @@ export default function App() {
     setRemoteWalletPubKey("");
     setLastError("");
 
-    pendingInputsRef.current = {};
-    packetHeadsRef.current = { 1: ZERO32, 2: ZERO32 };
-    frameHeadRef.current = ZERO32;
-    sentFramesRef.current = new Set();
+    primeNetcode();
     setIsRunning(false);
 
     const nextMatchId = makeMatchId();
@@ -555,7 +580,8 @@ export default function App() {
 
   function startMatch() {
     if (!isConnected) return;
-    sentFramesRef.current = new Set();
+    primeNetcode();
+    setState(initialState());
     setIsRunning(true);
     connRef.current?.send({ type: "START_MATCH", matchId: matchIdRef.current } satisfies NetEnvelope);
   }
@@ -584,7 +610,7 @@ export default function App() {
       setLastError("");
       if (!wallet) throw new Error("Session wallet not ready.");
       const contract = requireArena();
-      const rHash = rulesHash({ fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true });
+      const rHash = rulesHash({ fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true, inputDelay: INPUT_DELAY });
       const opp = expectedOpponent.trim() || "0x0000000000000000000000000000000000000000";
       const windowSec = Number(responseWindowSec) || 0;
       const tx = await contract.challenge(matchIdRef.current, rHash, wallet.address, opp, windowSec, { value: stakeWei(stakeEth) });
@@ -722,7 +748,7 @@ export default function App() {
     return {
       version: 1,
       matchId,
-      rules: { fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true },
+      rules: { fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true, inputDelay: INPUT_DELAY },
       players: {
         p1: { slot: 1, address: p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
         p2: { slot: 2, address: !p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: !p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },

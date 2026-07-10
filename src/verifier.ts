@@ -28,6 +28,8 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
   const errors: string[] = [];
   const packetsByFrame = new Map<string, SignedInputPacket>();
   const packetHeads: { 1: string; 2: string } = { 1: ZERO_HASH, 2: ZERO_HASH };
+  const inputDelay = transcript.rules?.inputDelay ?? 1;
+  const hist: { 1: Record<number, string>; 2: Record<number, string> } = { 1: {}, 2: {} };
   const states: GameState[] = [initialState()];
   let frameHead = ZERO_HASH;
   let state = initialState();
@@ -73,7 +75,9 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
       if (packet.prevSelfHash !== packetHeads[packet.player]) errors.push(`frame ${frame} P${packet.player}: broken self chain`);
 
       const opponent = packet.player === 1 ? 2 : 1;
-      if (packet.prevOppHash !== packetHeads[opponent]) {
+      const ackFrame = frame - inputDelay;
+      const expectedOpp = ackFrame >= 1 ? hist[opponent][ackFrame] : ZERO_HASH;
+      if (packet.prevOppHash !== expectedOpp) {
         errors.push(`frame ${frame} P${packet.player}: broken opponent acknowledgement`);
       }
 
@@ -102,6 +106,8 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
 
     packetHeads[1] = p1.hash;
     packetHeads[2] = p2.hash;
+    hist[1][frame] = p1.hash;
+    hist[2][frame] = p2.hash;
     frameHead = expectedFrameHash;
     state = transition(state, p1.inputMask, p2.inputMask);
     states.push(state);

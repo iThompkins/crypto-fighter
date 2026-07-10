@@ -55,6 +55,7 @@ export type MatchTranscript = {
     roundFrames: number;
     maxHp: number;
     oneOutstandingPacket: true;
+    inputDelay: number;
   };
   players: {
     p1: TranscriptPlayer;

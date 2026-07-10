@@ -7,6 +7,13 @@ export const FPS = 30;
 export const ROUND_SECONDS = 10;
 export const ROUND_FRAMES = FPS * ROUND_SECONDS;
 
+// Delay-based netcode: local input for the current sim frame is committed
+// INPUT_DELAY frames in the future, so the opponent's packet (sent the same
+// number of frames early) has time to arrive without stalling the sim.
+// The signed packet chain reflects this: a packet for frame F acknowledges the
+// opponent's packet for frame F - INPUT_DELAY. (INPUT_DELAY = 1 == old lockstep.)
+export const INPUT_DELAY = 2;
+
 export const FIGHTER_W = 28;
 export const FIGHTER_H = 56;
 export const MOVE_SPEED = 5;

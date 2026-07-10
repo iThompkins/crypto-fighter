@@ -344,11 +344,12 @@ contract CryptoFighterArena {
         require(p1Next.player == 1 && p2Next.player == 2, "wrong slots");
         require(p1Next.matchId == c.matchId && p2Next.matchId == c.matchId, "wrong match");
 
-        // Revealed packets must chain onto the claimed final packet heads.
+        // Each revealed packet must self-chain onto the claimant's committed
+        // packet head for that player at the final frame. A valid signature over
+        // a packet chaining past the claimed end proves the match continued.
+        // (Opponent-ack linkage spans INPUT_DELAY frames and isn't checked here.)
         require(p1Next.prevSelfHash == c.claimedP1Head, "p1 self chain");
-        require(p1Next.prevOppHash == c.claimedP2Head, "p1 opp chain");
         require(p2Next.prevSelfHash == c.claimedP2Head, "p2 self chain");
-        require(p2Next.prevOppHash == c.claimedP1Head, "p2 opp chain");
 
         require(_recoverPacket(p1Next) == c.p1SessionKey, "bad P1 sig");
         require(_recoverPacket(p2Next) == c.p2SessionKey, "bad P2 sig");

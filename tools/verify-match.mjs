@@ -218,6 +218,8 @@ async function verifyTranscript(transcript) {
   const errors = [];
   const packetsByFrame = new Map();
   const packetHeads = { 1: ZERO_HASH, 2: ZERO_HASH };
+  const inputDelay = transcript.rules?.inputDelay ?? 1;
+  const hist = { 1: {}, 2: {} };
   let frameHead = ZERO_HASH;
   let state = initialState();
 
@@ -252,7 +254,9 @@ async function verifyTranscript(transcript) {
       if (packet.hash !== expectedHash) errors.push(`frame ${frame} P${packet.player}: hash mismatch`);
       if (packet.prevSelfHash !== packetHeads[packet.player]) errors.push(`frame ${frame} P${packet.player}: broken self chain`);
       const opponent = packet.player === 1 ? 2 : 1;
-      if (packet.prevOppHash !== packetHeads[opponent]) errors.push(`frame ${frame} P${packet.player}: broken opponent acknowledgement`);
+      const ackFrame = frame - inputDelay;
+      const expectedOpp = ackFrame >= 1 ? hist[opponent][ackFrame] : ZERO_HASH;
+      if (packet.prevOppHash !== expectedOpp) errors.push(`frame ${frame} P${packet.player}: broken opponent acknowledgement`);
 
       const expectedPubKey = packet.player === 1 ? transcript.players?.p1?.publicKey : transcript.players?.p2?.publicKey;
       if (expectedPubKey && packet.publicKey !== expectedPubKey) errors.push(`frame ${frame} P${packet.player}: public key mismatch`);
@@ -271,6 +275,8 @@ async function verifyTranscript(transcript) {
 
     packetHeads[1] = p1.hash;
     packetHeads[2] = p2.hash;
+    hist[1][frame] = p1.hash;
+    hist[2][frame] = p2.hash;
     frameHead = expectedFrameHash;
     state = transition(state, p1.inputMask, p2.inputMask);
   }

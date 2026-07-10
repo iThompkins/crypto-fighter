@@ -66,7 +66,8 @@ async function main() {
   const matchId = "0x" + bytesToHex(secp.etc ? crypto.getRandomValues(new Uint8Array(32)) : new Uint8Array(32));
   const p1 = wallet(), p2 = wallet();
   let state = initial();
-  const heads = { 1: ZERO32, 2: ZERO32 };
+  const D = 2; // input delay
+  const hist = { 1: {}, 2: {} };
   let frameHead = ZERO32;
   const packets = [], canonicalFrames = [];
 
@@ -78,21 +79,25 @@ async function main() {
     const masks = { 1: m1, 2: m2 };
     const keys = { 1: p1, 2: p2 };
     for (const player of [1, 2]) {
-      const ps = heads[player], po = heads[player === 1 ? 2 : 1];
+      const opp = player === 1 ? 2 : 1;
+      const ps = frame > 1 ? hist[player][frame - 1] : ZERO32;
+      const ack = frame - D;
+      const po = ack >= 1 ? hist[opp][ack] : ZERO32;
       const hash = packetHash(matchId, frame, player, masks[player], ps, po);
       packets.push({ matchId, frame, player, inputMask: masks[player], prevSelfHash: ps, prevOppHash: po, publicKey: keys[player].publicKey, signature: sign(keys[player].priv, hash), hash });
+      hist[player][frame] = hash;
     }
     const p1p = packets[packets.length - 2], p2p = packets[packets.length - 1];
     const fh = frameHash(matchId, frame, p1p.inputMask, p2p.inputMask, frameHead);
     canonicalFrames.push({ matchId, frame, p1InputMask: p1p.inputMask, p2InputMask: p2p.inputMask, prevFrameHash: frameHead, frameHash: fh });
-    heads[1] = p1p.hash; heads[2] = p2p.hash; frameHead = fh;
+    frameHead = fh;
     state = transition(state, p1p.inputMask, p2p.inputMask);
   }
 
   const stateHash = kec(new TextEncoder().encode(JSON.stringify(state)));
   const transcript = {
     version: 1, matchId,
-    rules: { fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true },
+    rules: { fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true, inputDelay: D },
     players: { p1: { slot: 1, address: p1.address, publicKey: p1.publicKey }, p2: { slot: 2, address: p2.address, publicKey: p2.publicKey } },
     packets, canonicalFrames,
     final: { frame: state.frame, frameHash: frameHead, stateHash, p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver },
