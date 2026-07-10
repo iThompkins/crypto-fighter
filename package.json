@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "verify-match": "node tools/verify-match.mjs",
     "test:contract": "bash hh/run-tests.sh",
-    "simulate-arena": "node tools/simulate-arena.mjs"
+    "simulate-arena": "node tools/simulate-arena.mjs",
+    "make-transcript": "node tools/make-transcript.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",

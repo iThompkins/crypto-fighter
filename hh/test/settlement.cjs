@@ -34,7 +34,7 @@ async function deploy() {
   return arena;
 }
 
-async function openMatch(arena, p1, p2, stake) {
+async function openMatch(arena, p1, p2, stake, windowSec = 3600) {
   const matchId = rand32();
   const rulesHash = ethers.id("rules-v1");
   const p1Session = ethers.Wallet.createRandom();
@@ -42,7 +42,7 @@ async function openMatch(arena, p1, p2, stake) {
 
   const tx = await arena
     .connect(p1)
-    .challenge(matchId, rulesHash, p1Session.address, ethers.ZeroAddress, 0, { value: stake });
+    .challenge(matchId, rulesHash, p1Session.address, ethers.ZeroAddress, windowSec, { value: stake });
   await tx.wait();
   const challengeId = 1n;
   await (await arena.connect(p2).join(challengeId, p2Session.address, { value: stake })).wait();
@@ -50,11 +50,22 @@ async function openMatch(arena, p1, p2, stake) {
 }
 
 describe("CryptoFighterArena settlement", function () {
+  it("instant window: window=0 lets the winner finalize immediately", async function () {
+    const [p1, p2] = await ethers.getSigners();
+    const stake = ethers.parseEther("1");
+    const arena = await deploy();
+    const { challengeId } = await openMatch(arena, p1, p2, stake, 0);
+    await (await arena.connect(p1).claimResult(challengeId, Outcome.P1, 50, rand32(), rand32(), rand32())).wait();
+    await (await arena.connect(p1).finalizeResult(challengeId)).wait(); // no time advance needed
+    const ch = await arena.getChallenge(challengeId);
+    assert.equal(ch.status, 3n, "finalized immediately with window=0");
+  });
+
   it("happy path: claim + finalize pays the pot to the winner", async function () {
     const [p1, p2] = await ethers.getSigners();
     const stake = ethers.parseEther("1");
     const arena = await deploy();
-    const { challengeId } = await openMatch(arena, p1, p2, stake);
+    const { challengeId } = await openMatch(arena, p1, p2, stake, 3600);
 
     const finalHead = rand32();
     await (await arena

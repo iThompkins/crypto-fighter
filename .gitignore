@@ -33,3 +33,7 @@ hh/node_modules
 .cache/
 crypto-fighter-*.png
 crypto-fighter-*.json
+
+# demo screenshots
+shots/
+decisive-transcript.json

@@ -196,9 +196,10 @@ contract CryptoFighterArena {
         require(p1SessionKey != address(0), "session key required");
 
         challengeId = nextChallengeId++;
-        uint64 window = responseWindowSeconds == 0
-            ? DEFAULT_RESPONSE_WINDOW_SECONDS
-            : responseWindowSeconds;
+        // Literal window. 0 = finalize immediately (no dispute window); larger
+        // values give the loser time to disprove a false claim. DEFAULT is only
+        // a suggested value for adversarial/production use.
+        uint64 window = responseWindowSeconds;
 
         bytes32 matchContextHash = keccak256(
             abi.encode(
@@ -318,7 +319,7 @@ contract CryptoFighterArena {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(c.resultClaimant != address(0), "no claim");
-        require(block.timestamp > c.resultDeadline, "window open");
+        require(block.timestamp >= c.resultDeadline, "window open");
 
         _finalize(challengeId, c.claimedOutcome);
     }

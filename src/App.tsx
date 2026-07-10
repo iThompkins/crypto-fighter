@@ -42,6 +42,7 @@ export default function App() {
   const [chainLabel, setChainLabel] = useState("");
   const [arenaAddress, setArenaAddress] = useState("");
   const [stakeEth, setStakeEth] = useState("0.01");
+  const [responseWindowSec, setResponseWindowSec] = useState("0");
   const [expectedOpponent, setExpectedOpponent] = useState("");
   const [onchainChallengeId, setOnchainChallengeId] = useState("");
   const mainSignerRef = useRef<Signer | null>(null);
@@ -561,7 +562,8 @@ export default function App() {
       const contract = requireArena();
       const rHash = rulesHash({ fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true });
       const opp = expectedOpponent.trim() || "0x0000000000000000000000000000000000000000";
-      const tx = await contract.challenge(matchIdRef.current, rHash, wallet.address, opp, 0, { value: stakeWei(stakeEth) });
+      const windowSec = Number(responseWindowSec) || 0;
+      const tx = await contract.challenge(matchIdRef.current, rHash, wallet.address, opp, windowSec, { value: stakeWei(stakeEth) });
       log(`challenge tx: ${short(tx.hash, 14)}`);
       const rc = await tx.wait();
       let id = "";
@@ -874,6 +876,11 @@ export default function App() {
           </section>
 
           <section style={styles.panel}>
+            {displayState.roundOver ? (
+              <div style={styles.endBanner}>
+                {outcomeText} · frame {displayState.frame} · HP {displayState.p1.hp}–{displayState.p2.hp}
+              </div>
+            ) : null}
             <div style={styles.arena}>
               <div style={{ ...styles.floor, top: FLOOR_Y }} />
               <div
@@ -1080,6 +1087,14 @@ export default function App() {
                 value={onchainChallengeId}
                 onChange={(e) => setOnchainChallengeId(e.target.value)}
                 placeholder="Challenge id"
+              />
+            </div>
+            <div style={styles.row}>
+              <input
+                style={styles.input}
+                value={responseWindowSec}
+                onChange={(e) => setResponseWindowSec(e.target.value)}
+                placeholder="Dispute window (seconds, 0 = instant finalize)"
               />
             </div>
             <div style={styles.row}>
@@ -1321,6 +1336,17 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: "uppercase",
     color: "#71717a",
     marginBottom: 6,
+  },
+  endBanner: {
+    marginBottom: 12,
+    padding: "10px 14px",
+    borderRadius: 12,
+    textAlign: "center",
+    fontWeight: 700,
+    fontSize: 18,
+    color: "#052e16",
+    background: "#4ade80",
+    border: "1px solid #22c55e",
   },
   arena: {
     position: "relative",

@@ -1,7 +1,15 @@
 import * as secp from "@noble/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
+import { sha256 } from "@noble/hashes/sha2";
+import { hmac } from "@noble/hashes/hmac";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import type { PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
+
+// Wire secp256k1's HMAC to pure-JS so signing works in non-secure contexts too
+// (e.g. the app served over plain http from a VM by IP, where crypto.subtle is
+// unavailable). Without this, signAsync can fail outside https/localhost.
+secp.etc.hmacSha256Sync = (key, ...msgs) => hmac(sha256, key, secp.etc.concatBytes(...msgs));
+secp.etc.hmacSha256Async = async (key, ...msgs) => hmac(sha256, key, secp.etc.concatBytes(...msgs));
 
 // 32-byte zero sentinel used to seed the packet/frame hash chains.
 export const ZERO32 = "0x" + "00".repeat(32);
