@@ -9,6 +9,9 @@ import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
 import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
+// Keys the game consumes; preventDefault so arrows/space don't scroll the page.
+const GAME_KEYS = new Set(["a", "d", "arrowleft", "arrowright", " ", "f", "j", "k", "/"]);
+
 export default function App() {
   const [state, setState] = useState<GameState>(initialState());
   const [matchId, setMatchId] = useState(makeMatchId);
@@ -36,6 +39,7 @@ export default function App() {
   const [replayResult, setReplayResult] = useState<TranscriptVerificationResult | null>(null);
   const [replayFrame, setReplayFrame] = useState(0);
   const [isReplayPlaying, setIsReplayPlaying] = useState(false);
+  const [devMode, setDevMode] = useState(false);
 
   // On-chain settlement (MetaMask main wallet).
   const [mainWalletAddress, setMainWalletAddress] = useState("");
@@ -97,7 +101,9 @@ export default function App() {
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      keyState.current[e.key.toLowerCase()] = true;
+      const key = e.key.toLowerCase();
+      if (GAME_KEYS.has(key)) e.preventDefault();
+      keyState.current[key] = true;
     };
     const up = (e: KeyboardEvent) => {
       keyState.current[e.key.toLowerCase()] = false;
@@ -380,19 +386,14 @@ export default function App() {
     // packets simply buffer until the tick consumes them.
   }
 
-  const currentLocalInputMask = useCallback((slot = localSlotRef.current) => {
-    if (slot === 1) {
-      return encodeInputMask({
-        left: !!keyState.current["a"],
-        right: !!keyState.current["d"],
-        attack: !!keyState.current["f"],
-      });
-    }
-
+  // Symmetric controls: every player uses the same keys for their own fighter
+  // (each runs in their own tab/browser, so there is no shared keyboard).
+  const currentLocalInputMask = useCallback(() => {
+    const k = keyState.current;
     return encodeInputMask({
-      left: !!keyState.current["arrowleft"],
-      right: !!keyState.current["arrowright"],
-      attack: !!keyState.current["/"],
+      left: !!(k["a"] || k["arrowleft"]),
+      right: !!(k["d"] || k["arrowright"]),
+      attack: !!(k[" "] || k["f"] || k["j"] || k["k"] || k["/"]),
     });
   }, []);
 
@@ -452,7 +453,7 @@ export default function App() {
         const ackFrame = frame - INPUT_DELAY;
         if (ackFrame >= 1 && oppHashByFrameRef.current[ackFrame] === undefined) break;
 
-        const inputMask = currentLocalInputMask(slot);
+        const inputMask = currentLocalInputMask();
         const packet = await buildSignedPacket(frame, inputMask);
         if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
         pendingInputsRef.current[frame][slot] = packet;
@@ -796,9 +797,14 @@ export default function App() {
       <div style={styles.wrap}>
         <div style={styles.leftCol}>
           <section style={styles.panel}>
-            <h1 style={styles.h1}>Crypto Fighter MVP</h1>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h1 style={styles.h1}>Crypto Fighter</h1>
+              <button style={styles.buttonSecondary} onClick={() => setDevMode((v) => !v)}>
+                {devMode ? "Dev mode" : "Regular mode"}
+              </button>
+            </div>
             <div style={styles.sub}>
-              Two-tab PeerJS demo. Pure React DOM rendering. No HTML canvas.
+              Controls — Move: A/D or ←/→ · Attack: Space (or F/J/K)
             </div>
 
             <div style={styles.row}>
@@ -821,13 +827,13 @@ export default function App() {
             </div>
 
             <div style={styles.grid4}>
-              <Stat title="Match ID" value={matchId} />
+              <Stat title="Match ID" value={short(matchId, 14)} />
               <Stat title="Role / Slot" value={`${role} / P${localSlot}`} />
               <Stat title="Frame" value={`${displayState.frame} / ${ROUND_FRAMES}`} />
               <Stat title="Timer" value={`${(displayState.timerFramesLeft / FPS).toFixed(2)}s`} />
               <Stat title="Sync" value={replayResult ? `Replay ${replayFrame}/${replayResult.states.length - 1}` : syncText} />
-              <Stat title="Game FPS" value={gameFps.toFixed(1)} />
-              <Stat title="Crypto ms" value={`sign ${perf.sign.toFixed(1)} · verify ${perf.verify.toFixed(1)}`} />
+              {devMode && <Stat title="Game FPS" value={gameFps.toFixed(1)} />}
+              {devMode && <Stat title="Crypto ms" value={`sign ${perf.sign.toFixed(1)} · verify ${perf.verify.toFixed(1)}`} />}
             </div>
           </section>
 
@@ -868,7 +874,7 @@ export default function App() {
           <section style={styles.grid2}>
             <PlayerCard
               title="Player 1"
-              controls="A / D / F"
+              controls="A/D · Space"
               hp={displayState.p1.hp}
               maxHp={MAX_HP}
               address={localSlot === 1 ? wallet?.address ?? "generating..." : remoteWalletAddress || "waiting..."}
@@ -877,7 +883,7 @@ export default function App() {
             />
             <PlayerCard
               title="Player 2"
-              controls="← / → / /"
+              controls="A/D · Space"
               hp={displayState.p2.hp}
               maxHp={MAX_HP}
               address={localSlot === 2 ? wallet?.address ?? "generating..." : remoteWalletAddress || "waiting..."}
@@ -939,13 +945,15 @@ export default function App() {
 
             <div style={styles.grid3}>
               <Stat title="Outcome" value={outcomeText} />
-              <Stat title="Canonical head" value={short(displayFrameHash, 24)} />
-              <Stat title="Final state hash" value={displayStateHash ? short(displayStateHash, 24) : "pending"} />
+              {devMode && <Stat title="Canonical head" value={short(displayFrameHash, 24)} />}
+              {devMode && <Stat title="Final state hash" value={displayStateHash ? short(displayStateHash, 24) : "pending"} />}
             </div>
           </section>
         </div>
 
         <div style={styles.rightCol}>
+          {devMode && (
+            <>
           <section style={styles.panel}>
             <h2 style={styles.h2}>Transcript replay</h2>
             <div style={styles.sub}>Paste or import a transcript JSON to verify and replay it locally.</div>
@@ -1065,6 +1073,8 @@ export default function App() {
               </button>
             </div>
           </section>
+            </>
+          )}
 
           <section style={styles.panel}>
             <h2 style={styles.h2}>On-chain settlement</h2>
@@ -1136,6 +1146,7 @@ export default function App() {
             </div>
           </section>
 
+          {devMode && (
           <section style={styles.panel}>
             <h2 style={styles.h2}>Final settlement payload</h2>
             <pre style={styles.pre}>
@@ -1144,6 +1155,7 @@ export default function App() {
                 : "Available when the match ends."}
             </pre>
           </section>
+          )}
         </div>
       </div>
     </div>
