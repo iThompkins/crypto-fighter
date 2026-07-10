@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify-match": "node tools/verify-match.mjs",
+    "simulate-arena": "node tools/simulate-arena.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.577.0",

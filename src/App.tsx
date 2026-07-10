@@ -1,374 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import Peer from "peerjs";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Peer, { type DataConnection } from "peerjs";
+import { canonicalInputPayload, createSessionWallet, sha256Hex, signPayload, verifyPacket } from "./crypto";
+import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
+import { short } from "./format";
+import type { TranscriptVerificationResult } from "./verifier";
+import { verifyTranscript } from "./verifier";
+import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
-type PlayerSlot = 1 | 2;
-
-type Fighter = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  hp: number;
-  facing: 1 | -1;
-  attackCooldown: number;
-  attackActive: number;
-};
-
-type GameState = {
-  frame: number;
-  timerFramesLeft: number;
-  p1: Fighter;
-  p2: Fighter;
-  winner: "P1" | "P2" | "TIE_BOTH_LOSE" | null;
-  roundOver: boolean;
-};
-
-type SignedInputPacket = {
-  matchId: string;
-  frame: number;
-  player: PlayerSlot;
-  inputMask: number;
-  prevSelfHash: string;
-  prevOppHash: string;
-  publicKey: string;
-  signature: string;
-  hash: string;
-};
-
-type CanonicalFrame = {
-  matchId: string;
-  frame: number;
-  p1InputMask: number;
-  p2InputMask: number;
-  prevFrameHash: string;
-  frameHash: string;
-};
-
-type SessionWallet = {
-  address: string;
-  publicKey: string;
-  privateKey: CryptoKey;
-};
-
-type NetEnvelope =
-  | {
-      type: "HELLO";
-      matchId: string;
-      fromSlot: PlayerSlot;
-      walletAddress: string;
-      publicKey: string;
-    }
-  | {
-      type: "INPUT_PACKET";
-      packet: SignedInputPacket;
-    }
-  | {
-      type: "START_MATCH";
-      matchId: string;
-    }
-  | {
-      type: "RESET_MATCH";
-      matchId: string;
-    };
-
-const WIDTH = 720;
-const HEIGHT = 360;
-const FLOOR_Y = 260;
-const FPS = 30;
-const ROUND_SECONDS = 10;
-const ROUND_FRAMES = FPS * ROUND_SECONDS;
-
-const FIGHTER_W = 28;
-const FIGHTER_H = 56;
-const MOVE_SPEED = 5;
-
-const ATTACK_ACTIVE_FRAMES = 4;
-const ATTACK_COOLDOWN_FRAMES = 10;
-const ATTACK_W = 18;
-const ATTACK_H = 14;
-const ATTACK_REACH = 22;
-const DAMAGE = 1;
-const MAX_HP = 7;
-
-const INPUT = {
-  LEFT: 1,
-  RIGHT: 2,
-  ATTACK: 4,
-} as const;
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-function bytesToHex(bytes: Uint8Array) {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function hexToBytes(hex: string) {
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < clean.length; i += 2) {
-    out[i / 2] = parseInt(clean.slice(i, i + 2), 16);
-  }
-  return out;
-}
-
-async function sha256Hex(input: string) {
-  const data = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return "0x" + bytesToHex(new Uint8Array(digest));
-}
-
-async function exportSpkiHex(publicKey: CryptoKey) {
-  const spki = await crypto.subtle.exportKey("spki", publicKey);
-  return "0x" + bytesToHex(new Uint8Array(spki));
-}
-
-async function deriveAddressFromPublicKey(publicKey: CryptoKey) {
-  const spki = await crypto.subtle.exportKey("spki", publicKey);
-  const digest = await crypto.subtle.digest("SHA-256", spki);
-  const hex = bytesToHex(new Uint8Array(digest));
-  return "0x" + hex.slice(-40);
-}
-
-async function createSessionWallet(): Promise<SessionWallet> {
-  const pair = await crypto.subtle.generateKey(
-    {
-      name: "ECDSA",
-      namedCurve: "P-256",
-    },
-    true,
-    ["sign", "verify"]
-  );
-
-  const publicKey = await exportSpkiHex(pair.publicKey);
-  const address = await deriveAddressFromPublicKey(pair.publicKey);
-
-  return {
-    address,
-    publicKey,
-    privateKey: pair.privateKey,
-  };
-}
-
-function encodeInputMask(input: {
-  left: boolean;
-  right: boolean;
-  attack: boolean;
-}) {
-  let mask = 0;
-  if (input.left) mask |= INPUT.LEFT;
-  if (input.right) mask |= INPUT.RIGHT;
-  if (input.attack) mask |= INPUT.ATTACK;
-  return mask;
-}
-
-function decodeInputMask(mask: number) {
-  return {
-    left: !!(mask & INPUT.LEFT),
-    right: !!(mask & INPUT.RIGHT),
-    attack: !!(mask & INPUT.ATTACK),
-  };
-}
-
-function canonicalInputPayload(
-  matchId: string,
-  frame: number,
-  player: PlayerSlot,
-  inputMask: number,
-  prevSelfHash: string,
-  prevOppHash: string
-) {
-  return JSON.stringify({
-    matchId,
-    frame,
-    player,
-    inputMask,
-    prevSelfHash,
-    prevOppHash,
-  });
-}
-
-async function signPayload(privateKey: CryptoKey, payload: string) {
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(payload)
-  );
-  return "0x" + bytesToHex(new Uint8Array(signature));
-}
-
-async function importVerifyKeyFromSpkiHex(spkiHex: string) {
-  return crypto.subtle.importKey(
-    "spki",
-    hexToBytes(spkiHex),
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["verify"]
-  );
-}
-
-async function verifyPacket(packet: SignedInputPacket) {
-  const key = await importVerifyKeyFromSpkiHex(packet.publicKey);
-  const payload = canonicalInputPayload(
-    packet.matchId,
-    packet.frame,
-    packet.player,
-    packet.inputMask,
-    packet.prevSelfHash,
-    packet.prevOppHash
-  );
-
-  return crypto.subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
-    key,
-    hexToBytes(packet.signature),
-    new TextEncoder().encode(payload)
-  );
-}
-
-function rectsOverlap(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number }
-) {
-  return (
-    a.x < b.x + b.w &&
-    a.x + a.w > b.x &&
-    a.y < b.y + b.h &&
-    a.y + a.h > b.y
-  );
-}
-
-function getAttackRect(f: Fighter) {
-  if (f.attackActive <= 0) return null;
-
-  const midY = f.y + Math.floor(f.h / 2) - Math.floor(ATTACK_H / 2);
-
-  if (f.facing === 1) {
-    return {
-      x: f.x + f.w,
-      y: midY,
-      w: ATTACK_W + ATTACK_REACH,
-      h: ATTACK_H,
-    };
-  }
-
-  return {
-    x: f.x - (ATTACK_W + ATTACK_REACH),
-    y: midY,
-    w: ATTACK_W + ATTACK_REACH,
-    h: ATTACK_H,
-  };
-}
-
-function initialState(): GameState {
-  return {
-    frame: 0,
-    timerFramesLeft: ROUND_FRAMES,
-    roundOver: false,
-    winner: null,
-    p1: {
-      x: 120,
-      y: FLOOR_Y - FIGHTER_H,
-      w: FIGHTER_W,
-      h: FIGHTER_H,
-      hp: MAX_HP,
-      facing: 1,
-      attackCooldown: 0,
-      attackActive: 0,
-    },
-    p2: {
-      x: WIDTH - 120 - FIGHTER_W,
-      y: FLOOR_Y - FIGHTER_H,
-      w: FIGHTER_W,
-      h: FIGHTER_H,
-      hp: MAX_HP,
-      facing: -1,
-      attackCooldown: 0,
-      attackActive: 0,
-    },
-  };
-}
-
-function transition(prev: GameState, p1Mask: number, p2Mask: number): GameState {
-  if (prev.roundOver) return prev;
-
-  const s: GameState = JSON.parse(JSON.stringify(prev));
-  s.frame += 1;
-  s.timerFramesLeft = Math.max(0, s.timerFramesLeft - 1);
-
-  const p1Input = decodeInputMask(p1Mask);
-  const p2Input = decodeInputMask(p2Mask);
-
-  s.p1.facing = s.p1.x <= s.p2.x ? 1 : -1;
-  s.p2.facing = s.p2.x >= s.p1.x ? -1 : 1;
-
-  if (s.p1.attackCooldown > 0) s.p1.attackCooldown -= 1;
-  if (s.p2.attackCooldown > 0) s.p2.attackCooldown -= 1;
-  if (s.p1.attackActive > 0) s.p1.attackActive -= 1;
-  if (s.p2.attackActive > 0) s.p2.attackActive -= 1;
-
-  const p1Move = (p1Input.left ? -MOVE_SPEED : 0) + (p1Input.right ? MOVE_SPEED : 0);
-  const p2Move = (p2Input.left ? -MOVE_SPEED : 0) + (p2Input.right ? MOVE_SPEED : 0);
-
-  s.p1.x = clamp(s.p1.x + p1Move, 0, WIDTH - s.p1.w);
-  s.p2.x = clamp(s.p2.x + p2Move, 0, WIDTH - s.p2.w);
-
-  s.p1.facing = s.p1.x <= s.p2.x ? 1 : -1;
-  s.p2.facing = s.p2.x >= s.p1.x ? -1 : 1;
-
-  if (p1Input.attack && s.p1.attackCooldown === 0 && s.p1.attackActive === 0) {
-    s.p1.attackActive = ATTACK_ACTIVE_FRAMES;
-    s.p1.attackCooldown = ATTACK_COOLDOWN_FRAMES;
-  }
-
-  if (p2Input.attack && s.p2.attackCooldown === 0 && s.p2.attackActive === 0) {
-    s.p2.attackActive = ATTACK_ACTIVE_FRAMES;
-    s.p2.attackCooldown = ATTACK_COOLDOWN_FRAMES;
-  }
-
-  const p1Attack = getAttackRect(s.p1);
-  const p2Attack = getAttackRect(s.p2);
-
-  const p1Body = { x: s.p1.x, y: s.p1.y, w: s.p1.w, h: s.p1.h };
-  const p2Body = { x: s.p2.x, y: s.p2.y, w: s.p2.w, h: s.p2.h };
-
-  const p1Hits = !!p1Attack && rectsOverlap(p1Attack, p2Body);
-  const p2Hits = !!p2Attack && rectsOverlap(p2Attack, p1Body);
-
-  if (p1Hits) s.p2.hp = Math.max(0, s.p2.hp - DAMAGE);
-  if (p2Hits) s.p1.hp = Math.max(0, s.p1.hp - DAMAGE);
-
-  if (s.p1.hp === 0 && s.p2.hp === 0) {
-    s.roundOver = true;
-    s.winner = "TIE_BOTH_LOSE";
-  } else if (s.p1.hp === 0) {
-    s.roundOver = true;
-    s.winner = "P2";
-  } else if (s.p2.hp === 0) {
-    s.roundOver = true;
-    s.winner = "P1";
-  } else if (s.timerFramesLeft === 0) {
-    s.roundOver = true;
-    if (s.p1.hp > s.p2.hp) s.winner = "P1";
-    else if (s.p2.hp > s.p1.hp) s.winner = "P2";
-    else s.winner = "TIE_BOTH_LOSE";
-  }
-
-  return s;
-}
-
-function short(s: string, n = 18) {
-  if (!s) return "";
-  if (s.length <= n) return s;
-  return s.slice(0, n) + "...";
+function makeMatchId() {
+  return `match-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export default function App() {
   const [state, setState] = useState<GameState>(initialState());
-  const [matchId, setMatchId] = useState(`match-${Math.random().toString(36).slice(2, 10)}`);
+  const [matchId, setMatchId] = useState(makeMatchId);
   const [wallet, setWallet] = useState<SessionWallet | null>(null);
 
   const [role, setRole] = useState<"unassigned" | "host" | "joiner">("unassigned");
@@ -388,16 +33,26 @@ export default function App() {
   const [lastError, setLastError] = useState("");
   const [finalStateHash, setFinalStateHash] = useState("");
   const [finalFrameHash, setFinalFrameHash] = useState("0x00");
+  const [transcriptInput, setTranscriptInput] = useState("");
+  const [importedTranscript, setImportedTranscript] = useState<MatchTranscript | null>(null);
+  const [replayResult, setReplayResult] = useState<TranscriptVerificationResult | null>(null);
+  const [replayFrame, setReplayFrame] = useState(0);
+  const [isReplayPlaying, setIsReplayPlaying] = useState(false);
 
-  const peerRef = useRef<any>(null);
-  const connRef = useRef<any>(null);
+  const matchIdRef = useRef(matchId);
+  const stateRef = useRef(state);
+  const localSlotRef = useRef<PlayerSlot>(localSlot);
+  const remoteWalletPubKeyRef = useRef(remoteWalletPubKey);
+
+  const peerRef = useRef<Peer | null>(null);
+  const connRef = useRef<DataConnection | null>(null);
   const intervalRef = useRef<number | null>(null);
   const keyState = useRef<Record<string, boolean>>({});
   const pendingInputsRef = useRef<Record<number, Partial<Record<PlayerSlot, SignedInputPacket>>>>({});
-  const latestPrevSelf = useRef<{ 1: string; 2: string }>({ 1: "0x00", 2: "0x00" });
-  const latestSeenOpp = useRef<{ 1: string; 2: string }>({ 1: "0x00", 2: "0x00" });
+  const packetHeadsRef = useRef<{ 1: string; 2: string }>({ 1: "0x00", 2: "0x00" });
   const frameHeadRef = useRef("0x00");
   const sentFramesRef = useRef<Set<number>>(new Set());
+  const tickInFlightRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -426,12 +81,338 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    localSlotRef.current = localSlot;
+  }, [localSlot]);
+
+  useEffect(() => {
+    remoteWalletPubKeyRef.current = remoteWalletPubKey;
+  }, [remoteWalletPubKey]);
+
+  useEffect(() => {
     return () => {
       if (intervalRef.current) window.clearInterval(intervalRef.current);
       connRef.current?.close?.();
       peerRef.current?.destroy?.();
     };
   }, []);
+
+  function updateMatchId(nextMatchId: string) {
+    matchIdRef.current = nextMatchId;
+    setMatchId(nextMatchId);
+  }
+
+  function updateLocalSlot(nextSlot: PlayerSlot) {
+    localSlotRef.current = nextSlot;
+    setLocalSlot(nextSlot);
+  }
+
+  function updateRemoteWalletPubKey(nextPubKey: string) {
+    remoteWalletPubKeyRef.current = nextPubKey;
+    setRemoteWalletPubKey(nextPubKey);
+  }
+
+  const log = useCallback((line: string) => {
+    setLogs((prev) => [line, ...prev].slice(0, 100));
+  }, []);
+
+  async function initPeer(as: "host" | "joiner") {
+    try {
+      setLastError("");
+      peerRef.current?.destroy?.();
+      connRef.current?.close?.();
+
+      const peer = new Peer();
+      peerRef.current = peer;
+      setRole(as);
+      updateLocalSlot(as === "host" ? 1 : 2);
+
+      peer.on("open", (id: string) => {
+        setPeerId(id);
+        log(`peer open: ${id}`);
+      });
+
+      peer.on("connection", (conn) => {
+        if (as !== "host") return;
+        connRef.current = conn;
+        bindConnection(conn, 1);
+      });
+
+      peer.on("error", (err) => {
+        setLastError(String(err));
+        log(`peer error: ${String(err)}`);
+      });
+    } catch (e) {
+      setLastError(String(e));
+    }
+  }
+
+  function bindConnection(conn: DataConnection, slotForLocal: PlayerSlot) {
+    conn.on("open", () => {
+      setIsConnected(true);
+      log(`connection open to ${conn.peer}`);
+
+      if (wallet) {
+        const hello: NetEnvelope = {
+          type: "HELLO",
+          matchId,
+          fromSlot: slotForLocal,
+          walletAddress: wallet.address,
+          publicKey: wallet.publicKey,
+        };
+        conn.send(hello);
+      }
+    });
+
+    conn.on("data", (raw: unknown) => {
+      void handleNetMessage(raw as NetEnvelope);
+    });
+
+    conn.on("close", () => {
+      setIsConnected(false);
+      log("connection closed");
+    });
+
+    conn.on("error", (err) => {
+      setLastError(String(err));
+      log(`connection error: ${String(err)}`);
+    });
+  }
+
+  async function connectToHost() {
+    try {
+      if (!peerRef.current) {
+        setLastError("Initialize as joiner first.");
+        return;
+      }
+      const conn = peerRef.current.connect(remotePeerId.trim());
+      connRef.current = conn;
+      bindConnection(conn, 2);
+    } catch (e) {
+      setLastError(String(e));
+    }
+  }
+
+  const maybeAdvanceFrame = useCallback(async (frame: number) => {
+    const pair = pendingInputsRef.current[frame];
+    if (!pair?.[1] || !pair?.[2]) return;
+    if (frame !== stateRef.current.frame + 1) return;
+
+    const p1Packet = pair[1]!;
+    const p2Packet = pair[2]!;
+
+    packetHeadsRef.current[1] = p1Packet.hash;
+    packetHeadsRef.current[2] = p2Packet.hash;
+
+    const prevFrameHash = frameHeadRef.current;
+    const frameHash = await sha256Hex(
+      JSON.stringify({
+        matchId: matchIdRef.current,
+        frame,
+        p1InputMask: p1Packet.inputMask,
+        p2InputMask: p2Packet.inputMask,
+        prevFrameHash,
+      })
+    );
+
+    frameHeadRef.current = frameHash;
+    setFinalFrameHash(frameHash);
+
+    const canonical: CanonicalFrame = {
+      matchId: matchIdRef.current,
+      frame,
+      p1InputMask: p1Packet.inputMask,
+      p2InputMask: p2Packet.inputMask,
+      prevFrameHash,
+      frameHash,
+    };
+
+    const nextState = transition(stateRef.current, p1Packet.inputMask, p2Packet.inputMask);
+
+    delete pendingInputsRef.current[frame];
+    sentFramesRef.current.delete(frame);
+    setCanonicalFrames((prev) => [...prev, canonical]);
+    stateRef.current = nextState;
+    setState(nextState);
+    if (nextState.roundOver) setIsRunning(false);
+
+    log(`frame ${frame}: canonicalized + advanced`);
+  }, [log]);
+
+  async function handleNetMessage(msg: NetEnvelope) {
+    if (msg.type === "HELLO") {
+      setRemoteWalletAddress(msg.walletAddress);
+      updateRemoteWalletPubKey(msg.publicKey);
+
+      if (msg.fromSlot === 1) {
+        updateMatchId(msg.matchId);
+        log(`adopted host match context: ${msg.matchId}`);
+      }
+
+      log(`HELLO from P${msg.fromSlot} ${short(msg.walletAddress, 14)}`);
+      return;
+    }
+
+    if (msg.type === "START_MATCH") {
+      updateMatchId(msg.matchId);
+      log(`remote started match: ${msg.matchId}`);
+      setIsRunning(true);
+      return;
+    }
+
+    if (msg.type === "RESET_MATCH") {
+      log("remote requested reset");
+      await resetLocal(false);
+      updateMatchId(msg.matchId);
+      return;
+    }
+
+    if (msg.type === "INPUT_PACKET") {
+      const rejection = await validateRemotePacket(msg.packet);
+      if (rejection) {
+        log(`frame ${msg.packet.frame}: rejected remote packet: ${rejection}`);
+        return;
+      }
+
+      log(`frame ${msg.packet.frame}: accepted remote packet`);
+      await storeIncomingPacket(msg.packet);
+    }
+  }
+
+  async function validateRemotePacket(packet: SignedInputPacket) {
+    const currentSlot = localSlotRef.current;
+    const currentState = stateRef.current;
+    const expectedRemoteSlot: PlayerSlot = currentSlot === 1 ? 2 : 1;
+
+    if (packet.player !== expectedRemoteSlot) return `expected P${expectedRemoteSlot}, got P${packet.player}`;
+    if (packet.matchId !== matchIdRef.current) return `wrong match context ${packet.matchId}`;
+    if (packet.frame <= currentState.frame) return `stale frame ${packet.frame}`;
+    if (packet.frame > currentState.frame + 1) return `future frame ${packet.frame} exceeds one-frame window`;
+    if (remoteWalletPubKeyRef.current && packet.publicKey !== remoteWalletPubKeyRef.current) return "public key changed after HELLO";
+
+    const payload = canonicalInputPayload(
+      packet.matchId,
+      packet.frame,
+      packet.player,
+      packet.inputMask,
+      packet.prevSelfHash,
+      packet.prevOppHash
+    );
+    const hash = await sha256Hex(payload);
+    if (hash !== packet.hash) return "packet hash does not match canonical payload";
+
+    if (packet.prevSelfHash !== packetHeadsRef.current[packet.player]) {
+      return `broken self hash chain for P${packet.player}`;
+    }
+
+    if (packet.prevOppHash !== packetHeadsRef.current[currentSlot]) {
+      return `broken opponent hash link for P${packet.player}`;
+    }
+
+    const existing = pendingInputsRef.current[packet.frame]?.[packet.player];
+    if (existing && existing.hash !== packet.hash) return "conflicting packet for frame/player";
+
+    const signatureOk = await verifyPacket(packet);
+    if (!signatureOk) return "signature verification failed";
+
+    return null;
+  }
+
+  async function storeIncomingPacket(packet: SignedInputPacket) {
+    const frame = packet.frame;
+    if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
+    pendingInputsRef.current[frame][packet.player] = packet;
+
+    setPackets((prev) => [...prev, packet]);
+
+    await maybeAdvanceFrame(frame);
+  }
+
+  const currentLocalInputMask = useCallback((slot = localSlotRef.current) => {
+    if (slot === 1) {
+      return encodeInputMask({
+        left: !!keyState.current["a"],
+        right: !!keyState.current["d"],
+        attack: !!keyState.current["f"],
+      });
+    }
+
+    return encodeInputMask({
+      left: !!keyState.current["arrowleft"],
+      right: !!keyState.current["arrowright"],
+      attack: !!keyState.current["/"],
+    });
+  }, []);
+
+  const buildSignedPacket = useCallback(async (frame: number, inputMask: number) => {
+    if (!wallet) throw new Error("Missing wallet");
+
+    const slot = localSlotRef.current;
+    const prevSelfHash = packetHeadsRef.current[slot];
+    const prevOppHash = packetHeadsRef.current[slot === 1 ? 2 : 1];
+
+    const payload = canonicalInputPayload(
+      matchIdRef.current,
+      frame,
+      slot,
+      inputMask,
+      prevSelfHash,
+      prevOppHash
+    );
+
+    const hash = await sha256Hex(payload);
+    const signature = await signPayload(wallet.privateKey, payload);
+
+    return {
+      matchId: matchIdRef.current,
+      frame,
+      player: slot,
+      inputMask,
+      prevSelfHash,
+      prevOppHash,
+      publicKey: wallet.publicKey,
+      signature,
+      hash,
+    } satisfies SignedInputPacket;
+  }, [wallet]);
+
+  const tick = useCallback(async () => {
+    if (tickInFlightRef.current) return;
+    tickInFlightRef.current = true;
+
+    try {
+      if (!connRef.current || !wallet || stateRef.current.roundOver) return;
+
+      const nextFrame = stateRef.current.frame + 1;
+
+      if (sentFramesRef.current.has(nextFrame)) {
+        await maybeAdvanceFrame(nextFrame);
+        return;
+      }
+
+      const slot = localSlotRef.current;
+      const inputMask = currentLocalInputMask(slot);
+      const packet = await buildSignedPacket(nextFrame, inputMask);
+
+      if (!pendingInputsRef.current[nextFrame]) pendingInputsRef.current[nextFrame] = {};
+      pendingInputsRef.current[nextFrame][slot] = packet;
+
+      sentFramesRef.current.add(nextFrame);
+
+      setPackets((prev) => [...prev, packet]);
+      connRef.current.send({ type: "INPUT_PACKET", packet } satisfies NetEnvelope);
+      log(`frame ${nextFrame}: sent local packet`);
+
+      await maybeAdvanceFrame(nextFrame);
+    } finally {
+      tickInFlightRef.current = false;
+    }
+  }, [buildSignedPacket, currentLocalInputMask, log, maybeAdvanceFrame, wallet]);
+
+
 
   useEffect(() => {
     if (!isConnected || !isRunning || state.roundOver) {
@@ -452,255 +433,69 @@ export default function App() {
         intervalRef.current = null;
       }
     };
-  }, [isConnected, isRunning, state.roundOver, state.frame, localSlot, wallet]);
+  }, [isConnected, isRunning, state.roundOver, tick]);
 
   useEffect(() => {
-    if (state.roundOver) {
-      setIsRunning(false);
-      void finalizeHashes();
-    }
-  }, [state.roundOver]);
+    if (!state.roundOver) return;
 
-  function log(line: string) {
-    setLogs((prev) => [line, ...prev].slice(0, 100));
-  }
+    let cancelled = false;
+    void (async () => {
+      const stateHash = await sha256Hex(JSON.stringify(state));
+      if (!cancelled) setFinalStateHash(stateHash);
+    })();
 
-  async function initPeer(as: "host" | "joiner") {
+    return () => {
+      cancelled = true;
+    };
+  }, [state]);
+
+  useEffect(() => {
+    if (!isReplayPlaying || !replayResult) return;
+
+    const id = window.setInterval(() => {
+      setReplayFrame((current) => {
+        const next = current + 1;
+        if (next >= replayResult.states.length - 1) {
+          setIsReplayPlaying(false);
+          return replayResult.states.length - 1;
+        }
+        return next;
+      });
+    }, 1000 / FPS);
+
+    return () => window.clearInterval(id);
+  }, [isReplayPlaying, replayResult]);
+
+  async function importTranscriptJson(json: string) {
     try {
       setLastError("");
-      peerRef.current?.destroy?.();
-      connRef.current?.close?.();
-
-      const peer = new Peer();
-      peerRef.current = peer;
-      setRole(as);
-      setLocalSlot(as === "host" ? 1 : 2);
-
-      peer.on("open", (id: string) => {
-        setPeerId(id);
-        log(`peer open: ${id}`);
-      });
-
-      peer.on("connection", (conn: any) => {
-        if (as !== "host") return;
-        connRef.current = conn;
-        bindConnection(conn, 1);
-      });
-
-      peer.on("error", (err: any) => {
-        setLastError(String(err));
-        log(`peer error: ${String(err)}`);
-      });
+      const parsed = JSON.parse(json) as MatchTranscript;
+      const result = await verifyTranscript(parsed);
+      setImportedTranscript(parsed);
+      setReplayResult(result);
+      setReplayFrame(0);
+      setIsReplayPlaying(false);
+      log(`imported transcript ${parsed.matchId}: verifier ${result.ok ? "ok" : "failed"}`);
     } catch (e) {
-      setLastError(String(e));
+      setLastError(`Transcript import failed: ${String(e)}`);
+      setImportedTranscript(null);
+      setReplayResult(null);
+      setIsReplayPlaying(false);
     }
   }
 
-  function bindConnection(conn: any, slotForLocal: PlayerSlot) {
-    conn.on("open", () => {
-      setIsConnected(true);
-      log(`connection open to ${conn.peer}`);
-
-      if (wallet) {
-        const hello: NetEnvelope = {
-          type: "HELLO",
-          matchId,
-          fromSlot: slotForLocal,
-          walletAddress: wallet.address,
-          publicKey: wallet.publicKey,
-        };
-        conn.send(hello);
-      }
-    });
-
-    conn.on("data", (raw: NetEnvelope) => {
-      void handleNetMessage(raw);
-    });
-
-    conn.on("close", () => {
-      setIsConnected(false);
-      log("connection closed");
-    });
-
-    conn.on("error", (err: any) => {
-      setLastError(String(err));
-      log(`connection error: ${String(err)}`);
-    });
+  async function importTranscriptFile(file: File | null) {
+    if (!file) return;
+    const json = await file.text();
+    setTranscriptInput(json);
+    await importTranscriptJson(json);
   }
 
-  async function connectToHost() {
-    try {
-      if (!peerRef.current) {
-        setLastError("Initialize as joiner first.");
-        return;
-      }
-      const conn = peerRef.current.connect(remotePeerId.trim());
-      connRef.current = conn;
-      bindConnection(conn, 2);
-    } catch (e) {
-      setLastError(String(e));
-    }
-  }
-
-  async function handleNetMessage(msg: NetEnvelope) {
-    if (msg.type === "HELLO") {
-      setRemoteWalletAddress(msg.walletAddress);
-      setRemoteWalletPubKey(msg.publicKey);
-      log(`HELLO from P${msg.fromSlot} ${short(msg.walletAddress, 14)}`);
-      return;
-    }
-
-    if (msg.type === "START_MATCH") {
-      log("remote started match");
-      setIsRunning(true);
-      return;
-    }
-
-    if (msg.type === "RESET_MATCH") {
-      log("remote requested reset");
-      await resetLocal(false);
-      setMatchId(msg.matchId);
-      return;
-    }
-
-    if (msg.type === "INPUT_PACKET") {
-      const ok = await verifyPacket(msg.packet);
-      if (!ok) {
-        log(`frame ${msg.packet.frame}: remote signature verification failed`);
-        return;
-      }
-      log(`frame ${msg.packet.frame}: verified remote packet`);
-      await storeIncomingPacket(msg.packet);
-    }
-  }
-
-  async function storeIncomingPacket(packet: SignedInputPacket) {
-    const frame = packet.frame;
-    if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
-    pendingInputsRef.current[frame][packet.player] = packet;
-
-    latestSeenOpp.current[localSlot] = packet.hash;
-    setPackets((prev) => [...prev, packet]);
-
-    await maybeAdvanceFrame(frame);
-  }
-
-  function currentLocalInputMask() {
-    if (localSlot === 1) {
-      return encodeInputMask({
-        left: !!keyState.current["a"],
-        right: !!keyState.current["d"],
-        attack: !!keyState.current["f"],
-      });
-    }
-
-    return encodeInputMask({
-      left: !!keyState.current["arrowleft"],
-      right: !!keyState.current["arrowright"],
-      attack: !!keyState.current["/"],
-    });
-  }
-
-  async function buildSignedPacket(frame: number, inputMask: number) {
-    if (!wallet) throw new Error("Missing wallet");
-
-    const payload = canonicalInputPayload(
-      matchId,
-      frame,
-      localSlot,
-      inputMask,
-      latestPrevSelf.current[localSlot],
-      latestSeenOpp.current[localSlot]
-    );
-
-    const hash = await sha256Hex(payload);
-    const signature = await signPayload(wallet.privateKey, payload);
-
-    return {
-      matchId,
-      frame,
-      player: localSlot,
-      inputMask,
-      prevSelfHash: latestPrevSelf.current[localSlot],
-      prevOppHash: latestSeenOpp.current[localSlot],
-      publicKey: wallet.publicKey,
-      signature,
-      hash,
-    } satisfies SignedInputPacket;
-  }
-
-  async function tick() {
-    if (!connRef.current || !wallet || state.roundOver) return;
-
-    const nextFrame = state.frame + 1;
-
-    if (sentFramesRef.current.has(nextFrame)) {
-      await maybeAdvanceFrame(nextFrame);
-      return;
-    }
-
-    const inputMask = currentLocalInputMask();
-    const packet = await buildSignedPacket(nextFrame, inputMask);
-
-    if (!pendingInputsRef.current[nextFrame]) pendingInputsRef.current[nextFrame] = {};
-    pendingInputsRef.current[nextFrame][localSlot] = packet;
-
-    latestPrevSelf.current[localSlot] = packet.hash;
-    sentFramesRef.current.add(nextFrame);
-
-    setPackets((prev) => [...prev, packet]);
-    connRef.current.send({ type: "INPUT_PACKET", packet } satisfies NetEnvelope);
-    log(`frame ${nextFrame}: sent local packet`);
-
-    await maybeAdvanceFrame(nextFrame);
-  }
-
-  async function maybeAdvanceFrame(frame: number) {
-    const pair = pendingInputsRef.current[frame];
-    if (!pair?.[1] || !pair?.[2]) return;
-    if (frame !== state.frame + 1) return;
-
-    const p1Packet = pair[1]!;
-    const p2Packet = pair[2]!;
-
-    latestSeenOpp.current[1] = p2Packet.hash;
-    latestSeenOpp.current[2] = p1Packet.hash;
-
-    const prevFrameHash = frameHeadRef.current;
-    const frameHash = await sha256Hex(
-      JSON.stringify({
-        matchId,
-        frame,
-        p1InputMask: p1Packet.inputMask,
-        p2InputMask: p2Packet.inputMask,
-        prevFrameHash,
-      })
-    );
-
-    frameHeadRef.current = frameHash;
-    setFinalFrameHash(frameHash);
-
-    const canonical: CanonicalFrame = {
-      matchId,
-      frame,
-      p1InputMask: p1Packet.inputMask,
-      p2InputMask: p2Packet.inputMask,
-      prevFrameHash,
-      frameHash,
-    };
-
-    const nextState = transition(state, p1Packet.inputMask, p2Packet.inputMask);
-
-    delete pendingInputsRef.current[frame];
-    setCanonicalFrames((prev) => [...prev, canonical]);
-    setState(nextState);
-
-    log(`frame ${frame}: canonicalized + advanced`);
-  }
-
-  async function finalizeHashes() {
-    const stateHash = await sha256Hex(JSON.stringify(state));
-    setFinalStateHash(stateHash);
+  function clearReplay() {
+    setImportedTranscript(null);
+    setReplayResult(null);
+    setReplayFrame(0);
+    setIsReplayPlaying(false);
   }
 
   async function resetLocal(pushRemote = true) {
@@ -717,14 +512,13 @@ export default function App() {
     setLastError("");
 
     pendingInputsRef.current = {};
-    latestPrevSelf.current = { 1: "0x00", 2: "0x00" };
-    latestSeenOpp.current = { 1: "0x00", 2: "0x00" };
+    packetHeadsRef.current = { 1: "0x00", 2: "0x00" };
     frameHeadRef.current = "0x00";
     sentFramesRef.current = new Set();
     setIsRunning(false);
 
-    const nextMatchId = `match-${Math.random().toString(36).slice(2, 10)}`;
-    setMatchId(nextMatchId);
+    const nextMatchId = makeMatchId();
+    updateMatchId(nextMatchId);
 
     if (pushRemote && connRef.current?.open) {
       connRef.current.send({ type: "RESET_MATCH", matchId: nextMatchId } satisfies NetEnvelope);
@@ -735,26 +529,123 @@ export default function App() {
     if (!isConnected) return;
     sentFramesRef.current = new Set();
     setIsRunning(true);
-    connRef.current?.send({ type: "START_MATCH", matchId } satisfies NetEnvelope);
+    connRef.current?.send({ type: "START_MATCH", matchId: matchIdRef.current } satisfies NetEnvelope);
   }
 
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-    } catch {}
+    } catch (e) {
+      setLastError(`Clipboard copy failed: ${String(e)}`);
+    }
   }
 
-  const p1AttackRect = getAttackRect(state.p1);
-  const p2AttackRect = getAttackRect(state.p2);
+  function downloadText(filename: string, text: string) {
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const displayState = replayResult?.states[replayFrame] ?? state;
+  const displayFrameHash = importedTranscript
+    ? importedTranscript.canonicalFrames[replayFrame - 1]?.frameHash ?? "0x00"
+    : finalFrameHash;
+  const displayStateHash = replayResult && replayFrame === replayResult.states.length - 1
+    ? replayResult.replay.stateHash
+    : finalStateHash;
+  const p1AttackRect = getAttackRect(displayState.p1);
+  const p2AttackRect = getAttackRect(displayState.p2);
 
   const outcomeText =
-    state.winner === "P1"
+    displayState.winner === "P1"
       ? "P1 wins"
-      : state.winner === "P2"
+      : displayState.winner === "P2"
       ? "P2 wins"
-      : state.winner === "TIE_BOTH_LOSE"
+      : displayState.winner === "TIE_BOTH_LOSE"
       ? "Tie: both lose ante"
       : "In progress";
+
+  const nextFrame = state.frame + 1;
+  const pendingNext = pendingInputsRef.current[nextFrame] ?? {};
+  const localPending = !!pendingNext[localSlot];
+  const remoteSlot: PlayerSlot = localSlot === 1 ? 2 : 1;
+  const remotePending = !!pendingNext[remoteSlot];
+  const syncText = state.roundOver
+    ? "Round complete"
+    : !isRunning
+    ? "Idle"
+    : localPending && remotePending
+    ? `Ready to advance frame ${nextFrame}`
+    : localPending
+    ? `Waiting for P${remoteSlot} packet ${nextFrame}`
+    : `Ready to sign packet ${nextFrame}`;
+
+  const uniquePackets = useMemo(() => {
+    const byKey = new Map<string, SignedInputPacket>();
+    for (const packet of packets) {
+      byKey.set(`${packet.frame}:${packet.player}`, packet);
+    }
+    return [...byKey.values()].sort((a, b) => a.frame - b.frame || a.player - b.player);
+  }, [packets]);
+
+  const transcript = useMemo<MatchTranscript>(() => {
+    const p1Local = localSlot === 1;
+    return {
+      version: 1,
+      matchId,
+      rules: {
+        fps: FPS,
+        roundFrames: ROUND_FRAMES,
+        maxHp: MAX_HP,
+        oneOutstandingPacket: true,
+      },
+      players: {
+        p1: {
+          slot: 1,
+          address: p1Local ? wallet?.address ?? "" : remoteWalletAddress,
+          publicKey: p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey,
+        },
+        p2: {
+          slot: 2,
+          address: !p1Local ? wallet?.address ?? "" : remoteWalletAddress,
+          publicKey: !p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey,
+        },
+      },
+      packets: uniquePackets,
+      canonicalFrames,
+      final: {
+        frame: state.frame,
+        frameHash: finalFrameHash,
+        stateHash: finalStateHash,
+        p1Hp: state.p1.hp,
+        p2Hp: state.p2.hp,
+        winner: state.winner,
+        roundOver: state.roundOver,
+      },
+    };
+  }, [
+    canonicalFrames,
+    finalFrameHash,
+    finalStateHash,
+    localSlot,
+    matchId,
+    uniquePackets,
+    remoteWalletAddress,
+    remoteWalletPubKey,
+    state.frame,
+    state.p1.hp,
+    state.p2.hp,
+    state.roundOver,
+    state.winner,
+    wallet?.address,
+    wallet?.publicKey,
+  ]);
+
+  const transcriptJson = useMemo(() => JSON.stringify(transcript, null, 2), [transcript]);
 
   const finalSettlementPayload = useMemo(() => {
     if (!state.roundOver || !finalStateHash) return "";
@@ -820,8 +711,9 @@ export default function App() {
             <div style={styles.grid4}>
               <Stat title="Match ID" value={matchId} />
               <Stat title="Role / Slot" value={`${role} / P${localSlot}`} />
-              <Stat title="Frame" value={`${state.frame} / ${ROUND_FRAMES}`} />
-              <Stat title="Timer" value={`${(state.timerFramesLeft / FPS).toFixed(2)}s`} />
+              <Stat title="Frame" value={`${displayState.frame} / ${ROUND_FRAMES}`} />
+              <Stat title="Timer" value={`${(displayState.timerFramesLeft / FPS).toFixed(2)}s`} />
+              <Stat title="Sync" value={replayResult ? `Replay ${replayFrame}/${replayResult.states.length - 1}` : syncText} />
             </div>
           </section>
 
@@ -863,7 +755,7 @@ export default function App() {
             <PlayerCard
               title="Player 1"
               controls="A / D / F"
-              hp={state.p1.hp}
+              hp={displayState.p1.hp}
               maxHp={MAX_HP}
               address={localSlot === 1 ? wallet?.address ?? "generating..." : remoteWalletAddress || "waiting..."}
               publicKey={localSlot === 1 ? wallet?.publicKey ?? "generating..." : remoteWalletPubKey || "waiting..."}
@@ -872,7 +764,7 @@ export default function App() {
             <PlayerCard
               title="Player 2"
               controls="← / → / /"
-              hp={state.p2.hp}
+              hp={displayState.p2.hp}
               maxHp={MAX_HP}
               address={localSlot === 2 ? wallet?.address ?? "generating..." : remoteWalletAddress || "waiting..."}
               publicKey={localSlot === 2 ? wallet?.publicKey ?? "generating..." : remoteWalletPubKey || "waiting..."}
@@ -886,19 +778,19 @@ export default function App() {
               <div
                 style={{
                   ...styles.p1,
-                  left: state.p1.x,
-                  top: state.p1.y,
-                  width: state.p1.w,
-                  height: state.p1.h,
+                  left: displayState.p1.x,
+                  top: displayState.p1.y,
+                  width: displayState.p1.w,
+                  height: displayState.p1.h,
                 }}
               />
               <div
                 style={{
                   ...styles.p2,
-                  left: state.p2.x,
-                  top: state.p2.y,
-                  width: state.p2.w,
-                  height: state.p2.h,
+                  left: displayState.p2.x,
+                  top: displayState.p2.y,
+                  width: displayState.p2.w,
+                  height: displayState.p2.h,
                 }}
               />
 
@@ -928,13 +820,70 @@ export default function App() {
 
             <div style={styles.grid3}>
               <Stat title="Outcome" value={outcomeText} />
-              <Stat title="Canonical head" value={short(finalFrameHash, 24)} />
-              <Stat title="Final state hash" value={finalStateHash ? short(finalStateHash, 24) : "pending"} />
+              <Stat title="Canonical head" value={short(displayFrameHash, 24)} />
+              <Stat title="Final state hash" value={displayStateHash ? short(displayStateHash, 24) : "pending"} />
             </div>
           </section>
         </div>
 
         <div style={styles.rightCol}>
+          <section style={styles.panel}>
+            <h2 style={styles.h2}>Transcript replay</h2>
+            <div style={styles.sub}>Paste or import a transcript JSON to verify and replay it locally.</div>
+            <div style={styles.row}>
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(e) => void importTranscriptFile(e.currentTarget.files?.[0] ?? null)}
+              />
+            </div>
+            <textarea
+              style={styles.textarea}
+              value={transcriptInput}
+              onChange={(e) => setTranscriptInput(e.target.value)}
+              placeholder="Paste transcript JSON here..."
+            />
+            <div style={styles.row}>
+              <button style={styles.smallButton} onClick={() => void importTranscriptJson(transcriptInput)} disabled={!transcriptInput.trim()}>
+                Verify + Load
+              </button>
+              <button style={styles.smallButton} onClick={() => setIsReplayPlaying((v) => !v)} disabled={!replayResult}>
+                {isReplayPlaying ? "Pause" : "Play"}
+              </button>
+              <button style={styles.smallButton} onClick={() => setReplayFrame(0)} disabled={!replayResult}>
+                Restart
+              </button>
+              <button style={styles.smallButton} onClick={clearReplay} disabled={!replayResult}>
+                Clear
+              </button>
+            </div>
+            {replayResult ? (
+              <>
+                <div style={{ color: replayResult.ok ? "#4ade80" : "#f43f5e", marginTop: 10 }}>
+                  Verifier: {replayResult.ok ? "ok" : "failed"} | frame {replayFrame}/{replayResult.states.length - 1}
+                </div>
+                <input
+                  style={{ width: "100%", marginTop: 8 }}
+                  type="range"
+                  min={0}
+                  max={replayResult.states.length - 1}
+                  value={replayFrame}
+                  onChange={(e) => {
+                    setIsReplayPlaying(false);
+                    setReplayFrame(Number(e.target.value));
+                  }}
+                />
+                <div style={styles.packetBox}>
+                  <div>match: {importedTranscript?.matchId}</div>
+                  <div>winner: {replayResult.replay.winner ?? "pending"}</div>
+                  <div>final frame hash: {short(replayResult.replay.frameHash, 28)}</div>
+                  <div>final state hash: {short(replayResult.replay.stateHash, 28)}</div>
+                  {replayResult.errors.length ? <div>errors: {replayResult.errors.slice(0, 3).join(" | ")}</div> : null}
+                </div>
+              </>
+            ) : null}
+          </section>
+
           <section style={styles.panel}>
             <h2 style={styles.h2}>Verification log</h2>
             <div style={styles.scroll}>
@@ -978,6 +927,22 @@ export default function App() {
                 ))
               )}
             </div>
+          </section>
+
+          <section style={styles.panel}>
+            <h2 style={styles.h2}>Transcript export</h2>
+            <div style={styles.row}>
+              <button style={styles.smallButton} onClick={() => void copy(transcriptJson)}>
+                Copy Transcript
+              </button>
+              <button
+                style={styles.smallButton}
+                onClick={() => downloadText(`${matchId}-transcript.json`, transcriptJson)}
+              >
+                Download JSON
+              </button>
+            </div>
+            <pre style={styles.pre}>{transcriptJson}</pre>
           </section>
 
           <section style={styles.panel}>
@@ -1156,6 +1121,18 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #3f3f46",
     borderRadius: 10,
     padding: "10px 12px",
+  },
+  textarea: {
+    width: "100%",
+    minHeight: 120,
+    marginTop: 12,
+    background: "#09090b",
+    color: "#f4f4f5",
+    border: "1px solid #3f3f46",
+    borderRadius: 10,
+    padding: "10px 12px",
+    fontFamily: "monospace",
+    fontSize: 12,
   },
   label: {
     fontSize: 11,
