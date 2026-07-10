@@ -1,15 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Peer, { type DataConnection } from "peerjs";
-import { canonicalInputPayload, createSessionWallet, sha256Hex, signPayload, verifyPacket } from "./crypto";
+import { createSessionWallet, hashFrameFields, hashJson, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
 import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
 import { short } from "./format";
 import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
 import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
-
-function makeMatchId() {
-  return `match-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 export default function App() {
   const [state, setState] = useState<GameState>(initialState());
@@ -32,7 +28,7 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [lastError, setLastError] = useState("");
   const [finalStateHash, setFinalStateHash] = useState("");
-  const [finalFrameHash, setFinalFrameHash] = useState("0x00");
+  const [finalFrameHash, setFinalFrameHash] = useState(ZERO32);
   const [transcriptInput, setTranscriptInput] = useState("");
   const [importedTranscript, setImportedTranscript] = useState<MatchTranscript | null>(null);
   const [replayResult, setReplayResult] = useState<TranscriptVerificationResult | null>(null);
@@ -49,8 +45,8 @@ export default function App() {
   const intervalRef = useRef<number | null>(null);
   const keyState = useRef<Record<string, boolean>>({});
   const pendingInputsRef = useRef<Record<number, Partial<Record<PlayerSlot, SignedInputPacket>>>>({});
-  const packetHeadsRef = useRef<{ 1: string; 2: string }>({ 1: "0x00", 2: "0x00" });
-  const frameHeadRef = useRef("0x00");
+  const packetHeadsRef = useRef<{ 1: string; 2: string }>({ 1: ZERO32, 2: ZERO32 });
+  const frameHeadRef = useRef(ZERO32);
   const sentFramesRef = useRef<Set<number>>(new Set());
   const tickInFlightRef = useRef(false);
 
@@ -208,14 +204,12 @@ export default function App() {
     packetHeadsRef.current[2] = p2Packet.hash;
 
     const prevFrameHash = frameHeadRef.current;
-    const frameHash = await sha256Hex(
-      JSON.stringify({
-        matchId: matchIdRef.current,
-        frame,
-        p1InputMask: p1Packet.inputMask,
-        p2InputMask: p2Packet.inputMask,
-        prevFrameHash,
-      })
+    const frameHash = hashFrameFields(
+      matchIdRef.current,
+      frame,
+      p1Packet.inputMask,
+      p2Packet.inputMask,
+      prevFrameHash
     );
 
     frameHeadRef.current = frameHash;
@@ -293,7 +287,7 @@ export default function App() {
     if (packet.frame > currentState.frame + 1) return `future frame ${packet.frame} exceeds one-frame window`;
     if (remoteWalletPubKeyRef.current && packet.publicKey !== remoteWalletPubKeyRef.current) return "public key changed after HELLO";
 
-    const payload = canonicalInputPayload(
+    const hash = hashPacketFields(
       packet.matchId,
       packet.frame,
       packet.player,
@@ -301,7 +295,6 @@ export default function App() {
       packet.prevSelfHash,
       packet.prevOppHash
     );
-    const hash = await sha256Hex(payload);
     if (hash !== packet.hash) return "packet hash does not match canonical payload";
 
     if (packet.prevSelfHash !== packetHeadsRef.current[packet.player]) {
@@ -354,7 +347,7 @@ export default function App() {
     const prevSelfHash = packetHeadsRef.current[slot];
     const prevOppHash = packetHeadsRef.current[slot === 1 ? 2 : 1];
 
-    const payload = canonicalInputPayload(
+    const hash = hashPacketFields(
       matchIdRef.current,
       frame,
       slot,
@@ -363,8 +356,7 @@ export default function App() {
       prevOppHash
     );
 
-    const hash = await sha256Hex(payload);
-    const signature = await signPayload(wallet.privateKey, payload);
+    const signature = await signDigest(wallet.privateKey, hash);
 
     return {
       matchId: matchIdRef.current,
@@ -440,7 +432,7 @@ export default function App() {
 
     let cancelled = false;
     void (async () => {
-      const stateHash = await sha256Hex(JSON.stringify(state));
+      const stateHash = hashJson(state);
       if (!cancelled) setFinalStateHash(stateHash);
     })();
 
@@ -505,15 +497,15 @@ export default function App() {
     setPackets([]);
     setCanonicalFrames([]);
     setLogs([]);
-    setFinalFrameHash("0x00");
+    setFinalFrameHash(ZERO32);
     setFinalStateHash("");
     setRemoteWalletAddress("");
     setRemoteWalletPubKey("");
     setLastError("");
 
     pendingInputsRef.current = {};
-    packetHeadsRef.current = { 1: "0x00", 2: "0x00" };
-    frameHeadRef.current = "0x00";
+    packetHeadsRef.current = { 1: ZERO32, 2: ZERO32 };
+    frameHeadRef.current = ZERO32;
     sentFramesRef.current = new Set();
     setIsRunning(false);
 
@@ -552,7 +544,7 @@ export default function App() {
 
   const displayState = replayResult?.states[replayFrame] ?? state;
   const displayFrameHash = importedTranscript
-    ? importedTranscript.canonicalFrames[replayFrame - 1]?.frameHash ?? "0x00"
+    ? importedTranscript.canonicalFrames[replayFrame - 1]?.frameHash ?? ZERO32
     : finalFrameHash;
   const displayStateHash = replayResult && replayFrame === replayResult.states.length - 1
     ? replayResult.replay.stateHash

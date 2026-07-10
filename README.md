@@ -2,7 +2,7 @@
 
 A React + TypeScript + Vite MVP for a tiny peer-to-peer fighting game with signed frame inputs, strict off-chain realtime verification, transcript export, and an early escrow/dispute contract sketch.
 
-Two browser tabs connect through PeerJS. Each tab generates an ephemeral ECDSA P-256 session wallet, signs one local input packet for the next frame, verifies the remote player's packet, and only advances deterministic game state when both valid packets for the next canonical frame are present.
+Two browser tabs connect through PeerJS. Each tab generates an ephemeral secp256k1 session wallet, signs one local input packet for the next frame, verifies the remote player's packet, and only advances deterministic game state when both valid packets for the next canonical frame are present. Session-key signatures are recoverable on any EVM chain via `ecrecover`, so the same history the game replays off-chain is also settlement-grade on-chain.
 
 ## Current model
 
@@ -48,7 +48,7 @@ Together they form a cryptographically verifiable packet transcript. Game state 
 - Two-player PeerJS connection: one host tab, one joiner tab.
 - Deterministic 30 FPS target simulation.
 - Strict one-outstanding-frame packet window.
-- Signed per-frame input packets using Web Crypto ECDSA P-256.
+- Signed per-frame input packets using secp256k1 over a keccak256 `abi.encode` digest (EVM-recoverable via `ecrecover`).
 - Realtime packet validation:
   - match context
   - expected player slot
@@ -141,18 +141,25 @@ The browser verifier checks the same packet chain/signature/frame-hash rules as 
 
 ## Contract direction
 
-The intended settlement shape is:
+Two keys per player:
 
-1. `challenge(...)`: P1 opens escrow with stake, rules hash, and session key commitment.
-2. `join(...)`: P2 matches stake and commits session key.
-3. Happy path: both players sign final result and call `submitFinalResult(...)`.
-4. Naughty/stalled path:
-   - honest player calls `claimTimeout(...)` with latest transcript head and next packet commitment.
-   - accused player has a response window, e.g. 24 hours, to call `respondTimeout(...)` and continue the chain.
-   - if they fail, `forfeitTimeout(...)` awards the match to the claimant.
-5. Contract events feed a searchable reputation dashboard.
+- **Main wallet** (secp256k1, e.g. MetaMask): identity + escrow. It is `msg.sender` on `challenge`/`join`, so committing a session key in that transaction *is* the wallet's delegation of it. Pays the ante.
+- **Session key** (ephemeral secp256k1): signs the ~30/sec input packets. Verified off-chain during play; recoverable on-chain when a settlement dispute needs it.
 
-Important caveat: the browser currently uses P-256 session signatures. Ethereum wallet signatures are secp256k1. For production, final settlement should either use wallet signatures for final results, use secp256k1-compatible session keys, or deploy on a chain/verifier that supports P-256 packet verification.
+Settlement is **unilateral and optimistic** — no final co-signature (which an opponent could refuse):
+
+1. `challenge(matchId, rulesHash, p1SessionKey, expectedOpponent, window)`: P1 opens escrow, commits its session-key address, and optionally locks the opponent's main wallet. P1 never supplies P2's session key.
+2. `join(challengeId, p2SessionKey)`: P2 matches stake and commits its own session-key address.
+3. `claimResult(challengeId, outcome, finalFrame, finalHead, p1Head, p2Head)`: either player claims the result. No opponent signature required.
+4. `disputeResult(challengeId, p1Next, p2Next)`: within the window, anyone can disprove a claim by revealing a validly co-signed packet pair for the frame *after* the claimed final frame. Both packets must recover (`ecrecover`) to the two committed session keys, so they cannot be forged; their existence proves the match continued. A disproven claimant is slashed and the honest disputer wins the pot.
+5. `finalizeResult(challengeId)`: after the window with no dispute, the claim finalizes.
+6. Dispute/false-claim events (`ResultDisputed`, `falseResultClaims`) feed the reputation dashboard.
+
+Why the history is enough: every packet a player sent is signed by their own delegated session key, so the winner already holds the loser's signed moves. Settlement uses those existing signatures, not a new cooperative one — a losing player refusing to sign at the end is irrelevant. The only remaining refusal vector is *stalling* (never sending packets), handled by the separate `claimTimeout`/`respondTimeout`/`forfeitTimeout` liveness clock.
+
+This runs on any EVM chain including Ethereum L1: nothing on-chain verifies P-256; all on-chain checks are secp256k1 via `ecrecover`.
+
+Known limitation (next dispute type): the continuation proof catches any "the match didn't end here" lie. A claim at the *true* final frame but with a *wrong outcome* would additionally need an on-chain replay/fraud proof of that final transition; that is intentionally out of scope for this cut.
 
 ## Current verification status
 

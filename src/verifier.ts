@@ -1,8 +1,8 @@
-import { canonicalInputPayload, sha256Hex, verifyPacket } from "./crypto";
+import { hashFrameFields, hashJson, hashPacketFields, verifyPacket, ZERO32 } from "./crypto";
 import { initialState, transition } from "./game";
 import type { GameState, MatchTranscript, SignedInputPacket } from "./types";
 
-const ZERO_HASH = "0x00";
+const ZERO_HASH = ZERO32;
 
 export type TranscriptVerificationResult = {
   ok: boolean;
@@ -59,7 +59,7 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
     }
 
     for (const packet of [p1, p2]) {
-      const payload = canonicalInputPayload(
+      const expectedHash = hashPacketFields(
         packet.matchId,
         packet.frame,
         packet.player,
@@ -67,7 +67,6 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
         packet.prevSelfHash,
         packet.prevOppHash
       );
-      const expectedHash = await sha256Hex(payload);
 
       if (packet.matchId !== transcript.matchId) errors.push(`frame ${frame} P${packet.player}: wrong matchId`);
       if (packet.hash !== expectedHash) errors.push(`frame ${frame} P${packet.player}: hash mismatch`);
@@ -87,14 +86,12 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
       if (!signatureOk) errors.push(`frame ${frame} P${packet.player}: invalid signature`);
     }
 
-    const expectedFrameHash = await sha256Hex(
-      JSON.stringify({
-        matchId: transcript.matchId,
-        frame,
-        p1InputMask: p1.inputMask,
-        p2InputMask: p2.inputMask,
-        prevFrameHash: frameHead,
-      })
+    const expectedFrameHash = hashFrameFields(
+      transcript.matchId,
+      frame,
+      p1.inputMask,
+      p2.inputMask,
+      frameHead
     );
 
     if (canonical.matchId !== transcript.matchId) errors.push(`frame ${frame}: canonical matchId mismatch`);
@@ -110,7 +107,7 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
     states.push(state);
   }
 
-  const stateHash = await sha256Hex(JSON.stringify(state));
+  const stateHash = hashJson(state);
   if (transcript.final) {
     if (transcript.final.frame !== state.frame) errors.push(`final frame mismatch: transcript ${transcript.final.frame}, replay ${state.frame}`);
     if (transcript.final.frameHash !== frameHead) errors.push("final frame hash mismatch");

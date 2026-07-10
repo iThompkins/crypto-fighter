@@ -12,6 +12,8 @@
     "simulate-arena": "node tools/simulate-arena.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
+    "@noble/secp256k1": "^2.3.0",
     "lucide-react": "^0.577.0",
     "peerjs": "^1.5.5",
     "react": "^19.2.4",

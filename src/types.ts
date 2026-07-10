@@ -75,8 +75,10 @@ export type MatchTranscript = {
 
 export type SessionWallet = {
   address: string;
+  // Uncompressed secp256k1 public key (0x04-prefixed hex).
   publicKey: string;
-  privateKey: CryptoKey;
+  // secp256k1 private key as 0x-prefixed hex.
+  privateKey: string;
 };
 
 export type NetEnvelope =

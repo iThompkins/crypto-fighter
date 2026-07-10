@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { webcrypto } from "node:crypto";
-
-const crypto = globalThis.crypto ?? webcrypto;
+import * as secp from "@noble/secp256k1";
+import { keccak_256 } from "@noble/hashes/sha3";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 
 const FPS = 30;
 const ROUND_SECONDS = 10;
@@ -20,57 +20,98 @@ const ATTACK_REACH = 22;
 const DAMAGE = 1;
 const MAX_HP = 7;
 const INPUT = { LEFT: 1, RIGHT: 2, ATTACK: 4 };
-const ZERO_HASH = "0x00";
+const ZERO_HASH = "0x" + "00".repeat(32);
 
-function bytesToHex(bytes) {
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+function strip0x(hex) {
+  return hex.startsWith("0x") ? hex.slice(2) : hex;
 }
 
-function hexToBytes(hex) {
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < clean.length; i += 2) {
-    out[i / 2] = parseInt(clean.slice(i, i + 2), 16);
+function bytes32Word(hex) {
+  const bytes = hexToBytes(strip0x(hex));
+  if (bytes.length > 32) throw new Error(`bytes32 overflow: ${hex}`);
+  const word = new Uint8Array(32);
+  word.set(bytes, 32 - bytes.length);
+  return word;
+}
+
+function uintWord(value) {
+  let v = BigInt(value);
+  const word = new Uint8Array(32);
+  for (let i = 31; i >= 0 && v > 0n; i -= 1) {
+    word[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return word;
+}
+
+function concatBytes(chunks) {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
   }
   return out;
 }
 
-async function sha256Hex(input) {
-  const data = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return "0x" + bytesToHex(new Uint8Array(digest));
+function keccakHex(bytes) {
+  return "0x" + bytesToHex(keccak_256(bytes));
 }
 
-function canonicalInputPayload(matchId, frame, player, inputMask, prevSelfHash, prevOppHash) {
-  return JSON.stringify({ matchId, frame, player, inputMask, prevSelfHash, prevOppHash });
+function hashPacketFields(matchId, frame, player, inputMask, prevSelfHash, prevOppHash) {
+  return keccakHex(concatBytes([
+    bytes32Word(matchId),
+    uintWord(frame),
+    uintWord(player),
+    uintWord(inputMask),
+    bytes32Word(prevSelfHash),
+    bytes32Word(prevOppHash),
+  ]));
 }
 
-async function importVerifyKeyFromSpkiHex(spkiHex) {
-  return crypto.subtle.importKey(
-    "spki",
-    hexToBytes(spkiHex),
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["verify"]
-  );
+function hashFrameFields(matchId, frame, p1InputMask, p2InputMask, prevFrameHash) {
+  return keccakHex(concatBytes([
+    bytes32Word(matchId),
+    uintWord(frame),
+    uintWord(p1InputMask),
+    uintWord(p2InputMask),
+    bytes32Word(prevFrameHash),
+  ]));
 }
 
-async function verifyPacketSignature(packet) {
-  const key = await importVerifyKeyFromSpkiHex(packet.publicKey);
-  const payload = canonicalInputPayload(
-    packet.matchId,
-    packet.frame,
-    packet.player,
-    packet.inputMask,
-    packet.prevSelfHash,
-    packet.prevOppHash
-  );
-  return crypto.subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
-    key,
-    hexToBytes(packet.signature),
-    new TextEncoder().encode(payload)
-  );
+function hashJson(value) {
+  return keccakHex(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function addressFromPublicKey(publicKeyHex) {
+  const pub = hexToBytes(strip0x(publicKeyHex));
+  const body = pub.length === 65 ? pub.slice(1) : pub;
+  return "0x" + bytesToHex(keccak_256(body)).slice(-40);
+}
+
+function verifyPacketSignature(packet) {
+  try {
+    const digest = hashPacketFields(
+      packet.matchId,
+      packet.frame,
+      packet.player,
+      packet.inputMask,
+      packet.prevSelfHash,
+      packet.prevOppHash
+    );
+    if (digest !== packet.hash) return false;
+    const sig = hexToBytes(strip0x(packet.signature));
+    if (sig.length !== 65) return false;
+    const recovered = secp.Signature.fromCompact(sig.slice(0, 64))
+      .addRecoveryBit(sig[64] - 27)
+      .recoverPublicKey(hexToBytes(strip0x(digest)))
+      .toRawBytes(false);
+    const signer = addressFromPublicKey("0x" + bytesToHex(recovered));
+    return signer.toLowerCase() === addressFromPublicKey(packet.publicKey).toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 function clamp(n, min, max) {
@@ -206,8 +247,7 @@ async function verifyTranscript(transcript) {
     }
 
     for (const packet of [p1, p2]) {
-      const payload = canonicalInputPayload(packet.matchId, packet.frame, packet.player, packet.inputMask, packet.prevSelfHash, packet.prevOppHash);
-      const expectedHash = await sha256Hex(payload);
+      const expectedHash = hashPacketFields(packet.matchId, packet.frame, packet.player, packet.inputMask, packet.prevSelfHash, packet.prevOppHash);
       if (packet.matchId !== transcript.matchId) errors.push(`frame ${frame} P${packet.player}: wrong matchId`);
       if (packet.hash !== expectedHash) errors.push(`frame ${frame} P${packet.player}: hash mismatch`);
       if (packet.prevSelfHash !== packetHeads[packet.player]) errors.push(`frame ${frame} P${packet.player}: broken self chain`);
@@ -217,17 +257,11 @@ async function verifyTranscript(transcript) {
       const expectedPubKey = packet.player === 1 ? transcript.players?.p1?.publicKey : transcript.players?.p2?.publicKey;
       if (expectedPubKey && packet.publicKey !== expectedPubKey) errors.push(`frame ${frame} P${packet.player}: public key mismatch`);
 
-      const signatureOk = await verifyPacketSignature(packet).catch(() => false);
+      const signatureOk = verifyPacketSignature(packet);
       if (!signatureOk) errors.push(`frame ${frame} P${packet.player}: invalid signature`);
     }
 
-    const expectedFrameHash = await sha256Hex(JSON.stringify({
-      matchId: transcript.matchId,
-      frame,
-      p1InputMask: p1.inputMask,
-      p2InputMask: p2.inputMask,
-      prevFrameHash: frameHead,
-    }));
+    const expectedFrameHash = hashFrameFields(transcript.matchId, frame, p1.inputMask, p2.inputMask, frameHead);
 
     if (canonical.matchId !== transcript.matchId) errors.push(`frame ${frame}: canonical matchId mismatch`);
     if (canonical.p1InputMask !== p1.inputMask) errors.push(`frame ${frame}: p1 input mismatch`);
@@ -241,7 +275,7 @@ async function verifyTranscript(transcript) {
     state = transition(state, p1.inputMask, p2.inputMask);
   }
 
-  const stateHash = await sha256Hex(JSON.stringify(state));
+  const stateHash = hashJson(state);
   if (transcript.final) {
     if (transcript.final.frame !== state.frame) errors.push(`final frame mismatch: transcript ${transcript.final.frame}, replay ${state.frame}`);
     if (transcript.final.frameHash !== frameHead) errors.push("final frame hash mismatch");
