@@ -161,6 +161,33 @@ This runs on any EVM chain including Ethereum L1: nothing on-chain verifies P-25
 
 Known limitation (next dispute type): the continuation proof catches any "the match didn't end here" lie. A claim at the *true* final frame but with a *wrong outcome* would additionally need an on-chain replay/fraud proof of that final transition; that is intentionally out of scope for this cut.
 
+## Local on-chain testing
+
+The Solidity settlement is exercised two ways, both isolated in `hh/` (a small
+Hardhat harness with its own `package.json` so it does not fight the app's ESM):
+
+```bash
+npm run test:contract        # deploy to a local EVM; assert happy path + dispute
+```
+
+To click through the real UI against a local chain (stand-in for MetaMask):
+
+```bash
+# 1. start a local node (unlocked funded accounts)
+cd hh && XDG_CACHE_HOME="$PWD/../.cache/xdg" ../node_modules/.bin/hardhat node
+
+# 2. deploy the contract (new shell)
+cd hh && XDG_CACHE_HOME="$PWD/../.cache/xdg" ../node_modules/.bin/hardhat run scripts/deploy.cjs --network localhost
+
+# 3. serve the app, connect MetaMask to the local RPC, paste the Arena address
+npm run build && npm run preview
+```
+
+In the app's **On-chain settlement** panel: Connect Wallet, paste the Arena
+address, set a stake, then P1 **Challenge** and P2 **Join**; when a round ends,
+P1 **Claim Result** and (after the response window) **Finalize**. The headless
+equivalent of this flow lives in `hh/e2e-onchain.cjs`.
+
 ## Current verification status
 
 The latest smoke test produced a completed match transcript that the standalone verifier accepted:

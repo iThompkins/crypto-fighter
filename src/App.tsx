@@ -3,6 +3,8 @@ import Peer, { type DataConnection } from "peerjs";
 import { createSessionWallet, hashFrameFields, hashJson, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
 import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
 import { short } from "./format";
+import { arena, connectWallet, outcomeFromWinner, rulesHash, stakeWei } from "./chain";
+import type { Signer } from "ethers";
 import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
 import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
@@ -34,6 +36,15 @@ export default function App() {
   const [replayResult, setReplayResult] = useState<TranscriptVerificationResult | null>(null);
   const [replayFrame, setReplayFrame] = useState(0);
   const [isReplayPlaying, setIsReplayPlaying] = useState(false);
+
+  // On-chain settlement (MetaMask main wallet).
+  const [mainWalletAddress, setMainWalletAddress] = useState("");
+  const [chainLabel, setChainLabel] = useState("");
+  const [arenaAddress, setArenaAddress] = useState("");
+  const [stakeEth, setStakeEth] = useState("0.01");
+  const [expectedOpponent, setExpectedOpponent] = useState("");
+  const [onchainChallengeId, setOnchainChallengeId] = useState("");
+  const mainSignerRef = useRef<Signer | null>(null);
 
   const matchIdRef = useRef(matchId);
   const stateRef = useRef(state);
@@ -524,6 +535,104 @@ export default function App() {
     connRef.current?.send({ type: "START_MATCH", matchId: matchIdRef.current } satisfies NetEnvelope);
   }
 
+  async function connectMainWallet() {
+    try {
+      setLastError("");
+      const c = await connectWallet();
+      mainSignerRef.current = c.signer;
+      setMainWalletAddress(c.address);
+      setChainLabel(`chain ${c.chainId}`);
+      log(`wallet connected: ${short(c.address, 14)} (chain ${c.chainId})`);
+    } catch (e) {
+      setLastError(String(e));
+    }
+  }
+
+  function requireArena() {
+    if (!mainSignerRef.current) throw new Error("Connect wallet first.");
+    if (!arenaAddress.trim()) throw new Error("Set the Arena contract address.");
+    return arena(arenaAddress.trim(), mainSignerRef.current);
+  }
+
+  async function onchainChallenge() {
+    try {
+      setLastError("");
+      if (!wallet) throw new Error("Session wallet not ready.");
+      const contract = requireArena();
+      const rHash = rulesHash({ fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true });
+      const opp = expectedOpponent.trim() || "0x0000000000000000000000000000000000000000";
+      const tx = await contract.challenge(matchIdRef.current, rHash, wallet.address, opp, 0, { value: stakeWei(stakeEth) });
+      log(`challenge tx: ${short(tx.hash, 14)}`);
+      const rc = await tx.wait();
+      let id = "";
+      for (const lg of rc.logs) {
+        try {
+          const parsed = contract.interface.parseLog(lg);
+          if (parsed?.name === "ChallengeCreated") id = parsed.args.challengeId.toString();
+        } catch { /* not our event */ }
+      }
+      if (id) setOnchainChallengeId(id);
+      log(`challenge created: id ${id || "?"} stake ${stakeEth}`);
+    } catch (e) {
+      setLastError(String(e));
+    }
+  }
+
+  async function onchainJoin() {
+    try {
+      setLastError("");
+      if (!wallet) throw new Error("Session wallet not ready.");
+      const contract = requireArena();
+      const id = onchainChallengeId.trim();
+      if (!id) throw new Error("Enter the challenge id to join.");
+      const tx = await contract.join(id, wallet.address, { value: stakeWei(stakeEth) });
+      log(`join tx: ${short(tx.hash, 14)}`);
+      await tx.wait();
+      log(`joined challenge ${id}`);
+    } catch (e) {
+      setLastError(String(e));
+    }
+  }
+
+  async function onchainClaim() {
+    try {
+      setLastError("");
+      const contract = requireArena();
+      const id = onchainChallengeId.trim();
+      if (!id) throw new Error("No challenge id.");
+      if (!state.roundOver) throw new Error("Round is not over yet.");
+      const outcome = outcomeFromWinner(state.winner);
+      const tx = await contract.claimResult(
+        id,
+        outcome,
+        state.frame,
+        frameHeadRef.current,
+        packetHeadsRef.current[1],
+        packetHeadsRef.current[2]
+      );
+      log(`claimResult tx: ${short(tx.hash, 14)}`);
+      await tx.wait();
+      log(`result claimed for ${id}: outcome ${outcome}`);
+    } catch (e) {
+      setLastError(String(e));
+    }
+  }
+
+  async function onchainFinalize() {
+    try {
+      setLastError("");
+      const contract = requireArena();
+      const id = onchainChallengeId.trim();
+      if (!id) throw new Error("No challenge id.");
+      const tx = await contract.finalizeResult(id);
+      log(`finalizeResult tx: ${short(tx.hash, 14)}`);
+      await tx.wait();
+      log(`finalized ${id}`);
+    } catch (e) {
+      setLastError(String(e));
+    }
+  }
+
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -935,6 +1044,68 @@ export default function App() {
               </button>
             </div>
             <pre style={styles.pre}>{transcriptJson}</pre>
+          </section>
+
+          <section style={styles.panel}>
+            <h2 style={styles.h2}>On-chain settlement</h2>
+            <div style={styles.sub}>
+              Main wallet (MetaMask) pays the ante and delegates the session key. Session address:{" "}
+              {short(wallet?.address ?? "", 18) || "generating..."}
+            </div>
+            <div style={styles.row}>
+              <button style={styles.button} onClick={() => void connectMainWallet()}>
+                {mainWalletAddress ? "Wallet Connected" : "Connect Wallet"}
+              </button>
+              <div style={{ fontSize: 12, color: "#a1a1aa" }}>
+                {mainWalletAddress ? `${short(mainWalletAddress, 16)} · ${chainLabel}` : "not connected"}
+              </div>
+            </div>
+            <div style={styles.row}>
+              <input
+                style={styles.input}
+                value={arenaAddress}
+                onChange={(e) => setArenaAddress(e.target.value)}
+                placeholder="Arena contract address (0x...)"
+              />
+            </div>
+            <div style={styles.row}>
+              <input
+                style={styles.input}
+                value={stakeEth}
+                onChange={(e) => setStakeEth(e.target.value)}
+                placeholder="Stake (ETH)"
+              />
+              <input
+                style={styles.input}
+                value={onchainChallengeId}
+                onChange={(e) => setOnchainChallengeId(e.target.value)}
+                placeholder="Challenge id"
+              />
+            </div>
+            <div style={styles.row}>
+              <input
+                style={styles.input}
+                value={expectedOpponent}
+                onChange={(e) => setExpectedOpponent(e.target.value)}
+                placeholder="Opponent main wallet (optional lock)"
+              />
+            </div>
+            <div style={styles.row}>
+              <button style={styles.button} onClick={() => void onchainChallenge()} disabled={!mainWalletAddress}>
+                Challenge (P1)
+              </button>
+              <button style={styles.buttonSecondary} onClick={() => void onchainJoin()} disabled={!mainWalletAddress}>
+                Join (P2)
+              </button>
+            </div>
+            <div style={styles.row}>
+              <button style={styles.button} onClick={() => void onchainClaim()} disabled={!mainWalletAddress || !state.roundOver}>
+                Claim Result
+              </button>
+              <button style={styles.buttonSecondary} onClick={() => void onchainFinalize()} disabled={!mainWalletAddress}>
+                Finalize
+              </button>
+            </div>
           </section>
 
           <section style={styles.panel}>
