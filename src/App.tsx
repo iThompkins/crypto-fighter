@@ -62,6 +62,13 @@ export default function App() {
   const sentFramesRef = useRef<Set<number>>(new Set());
   const tickInFlightRef = useRef(false);
 
+  // Perf instrumentation: game advance rate + crypto op timing.
+  const advTimesRef = useRef<number[]>([]);
+  const signMsRef = useRef(0);
+  const verifyMsRef = useRef(0);
+  const [gameFps, setGameFps] = useState(0);
+  const [perf, setPerf] = useState({ sign: 0, verify: 0 });
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -245,6 +252,17 @@ export default function App() {
     setState(nextState);
     if (nextState.roundOver) setIsRunning(false);
 
+    // Measure real game advance rate over a ~2s sliding window.
+    const now = performance.now();
+    const times = advTimesRef.current;
+    times.push(now);
+    while (times.length && now - times[0] > 2000) times.shift();
+    if (times.length >= 2) {
+      const span = (times[times.length - 1] - times[0]) / 1000;
+      setGameFps(span > 0 ? (times.length - 1) / span : 0);
+    }
+    setPerf({ sign: signMsRef.current, verify: verifyMsRef.current });
+
     log(`frame ${frame}: canonicalized + advanced`);
   }, [log]);
 
@@ -320,7 +338,10 @@ export default function App() {
     const existing = pendingInputsRef.current[packet.frame]?.[packet.player];
     if (existing && existing.hash !== packet.hash) return "conflicting packet for frame/player";
 
+    const vStart = performance.now();
     const signatureOk = await verifyPacket(packet);
+    const vDt = performance.now() - vStart;
+    verifyMsRef.current = verifyMsRef.current === 0 ? vDt : verifyMsRef.current * 0.8 + vDt * 0.2;
     if (!signatureOk) return "signature verification failed";
 
     return null;
@@ -368,7 +389,10 @@ export default function App() {
       prevOppHash
     );
 
+    const sStart = performance.now();
     const signature = await signDigest(wallet.privateKey, hash);
+    const sDt = performance.now() - sStart;
+    signMsRef.current = signMsRef.current === 0 ? sDt : signMsRef.current * 0.8 + sDt * 0.2;
 
     return {
       matchId: matchIdRef.current,
@@ -817,6 +841,8 @@ export default function App() {
               <Stat title="Frame" value={`${displayState.frame} / ${ROUND_FRAMES}`} />
               <Stat title="Timer" value={`${(displayState.timerFramesLeft / FPS).toFixed(2)}s`} />
               <Stat title="Sync" value={replayResult ? `Replay ${replayFrame}/${replayResult.states.length - 1}` : syncText} />
+              <Stat title="Game FPS" value={gameFps.toFixed(1)} />
+              <Stat title="Crypto ms" value={`sign ${perf.sign.toFixed(1)} · verify ${perf.verify.toFixed(1)}`} />
             </div>
           </section>
 
