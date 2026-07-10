@@ -1197,25 +1197,36 @@ function Stat({ title, value }: { title: string; value: string }) {
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    minHeight: "100vh",
+    height: "100vh",
+    overflow: "hidden",
     background: "#0a0a0a",
     color: "#f4f4f5",
     padding: 20,
   },
   wrap: {
     maxWidth: 1400,
+    height: "100%",
     margin: "0 auto",
     display: "grid",
     gridTemplateColumns: "1.2fr 0.8fr",
     gap: 20,
+    minHeight: 0,
   },
   leftCol: {
     display: "grid",
     gap: 16,
+    alignContent: "start",
+    minHeight: 0,
+    overflowY: "auto",
+    paddingRight: 6,
   },
   rightCol: {
     display: "grid",
     gap: 16,
+    alignContent: "start",
+    minHeight: 0,
+    overflowY: "auto",
+    paddingRight: 6,
   },
   panel: {
     border: "1px solid #27272a",
@@ -1451,7 +1462,8 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#09090b",
     borderRadius: 10,
     padding: 10,
-    overflowX: "auto",
+    maxHeight: 240,
+    overflow: "auto",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     fontFamily: "monospace",
