@@ -368,16 +368,16 @@ export default function App() {
     return null;
   }
 
-  async function storeIncomingPacket(packet: SignedInputPacket) {
+  function storeIncomingPacket(packet: SignedInputPacket) {
     const frame = packet.frame;
     if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
     pendingInputsRef.current[frame][packet.player] = packet;
     oppHashByFrameRef.current[frame] = packet.hash;
 
     setPackets((prev) => [...prev, packet]);
-
-    // Try to advance the next needed frame (the arrival may complete its pair).
-    await maybeAdvanceFrame(stateRef.current.frame + 1);
+    // Do NOT advance here: the fixed 30fps tick is the sole clock. Advancing on
+    // every arrival too would double-step the sim (~60fps, ~5s rounds). Incoming
+    // packets simply buffer until the tick consumes them.
   }
 
   const currentLocalInputMask = useCallback((slot = localSlotRef.current) => {
