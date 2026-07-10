@@ -711,68 +711,27 @@ export default function App() {
     ? `Waiting for P${remoteSlot} packet ${nextFrame}`
     : `Ready to sign packet ${nextFrame}`;
 
-  const uniquePackets = useMemo(() => {
+  // Build the transcript on demand (Copy/Download) instead of every frame.
+  // Serializing the whole growing transcript per frame was O(n^2) and the main
+  // source of the slowdown as a match progressed.
+  const buildTranscript = useCallback((): MatchTranscript => {
     const byKey = new Map<string, SignedInputPacket>();
-    for (const packet of packets) {
-      byKey.set(`${packet.frame}:${packet.player}`, packet);
-    }
-    return [...byKey.values()].sort((a, b) => a.frame - b.frame || a.player - b.player);
-  }, [packets]);
-
-  const transcript = useMemo<MatchTranscript>(() => {
+    for (const packet of packets) byKey.set(`${packet.frame}:${packet.player}`, packet);
+    const uniquePackets = [...byKey.values()].sort((a, b) => a.frame - b.frame || a.player - b.player);
     const p1Local = localSlot === 1;
     return {
       version: 1,
       matchId,
-      rules: {
-        fps: FPS,
-        roundFrames: ROUND_FRAMES,
-        maxHp: MAX_HP,
-        oneOutstandingPacket: true,
-      },
+      rules: { fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true },
       players: {
-        p1: {
-          slot: 1,
-          address: p1Local ? wallet?.address ?? "" : remoteWalletAddress,
-          publicKey: p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey,
-        },
-        p2: {
-          slot: 2,
-          address: !p1Local ? wallet?.address ?? "" : remoteWalletAddress,
-          publicKey: !p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey,
-        },
+        p1: { slot: 1, address: p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
+        p2: { slot: 2, address: !p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: !p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
       },
       packets: uniquePackets,
       canonicalFrames,
-      final: {
-        frame: state.frame,
-        frameHash: finalFrameHash,
-        stateHash: finalStateHash,
-        p1Hp: state.p1.hp,
-        p2Hp: state.p2.hp,
-        winner: state.winner,
-        roundOver: state.roundOver,
-      },
+      final: { frame: state.frame, frameHash: finalFrameHash, stateHash: finalStateHash, p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver },
     };
-  }, [
-    canonicalFrames,
-    finalFrameHash,
-    finalStateHash,
-    localSlot,
-    matchId,
-    uniquePackets,
-    remoteWalletAddress,
-    remoteWalletPubKey,
-    state.frame,
-    state.p1.hp,
-    state.p2.hp,
-    state.roundOver,
-    state.winner,
-    wallet?.address,
-    wallet?.publicKey,
-  ]);
-
-  const transcriptJson = useMemo(() => JSON.stringify(transcript, null, 2), [transcript]);
+  }, [packets, canonicalFrames, localSlot, matchId, wallet?.address, wallet?.publicKey, remoteWalletAddress, remoteWalletPubKey, finalFrameHash, finalStateHash, state]);
 
   const finalSettlementPayload = useMemo(() => {
     if (!state.roundOver || !finalStateHash) return "";
@@ -1031,7 +990,7 @@ export default function App() {
               {packets.length === 0 ? (
                 <div>No packets yet.</div>
               ) : (
-                [...packets].slice(-8).reverse().map((p, idx) => (
+                packets.slice(-8).reverse().map((p, idx) => (
                   <div key={`${p.player}-${p.frame}-${idx}`} style={styles.packetBox}>
                     <div>player: P{p.player} | frame: {p.frame} | mask: {p.inputMask}</div>
                     <div>prevSelfHash: {short(p.prevSelfHash)}</div>
@@ -1050,7 +1009,7 @@ export default function App() {
               {canonicalFrames.length === 0 ? (
                 <div>No canonical frames yet.</div>
               ) : (
-                [...canonicalFrames].slice(-8).reverse().map((f) => (
+                canonicalFrames.slice(-8).reverse().map((f) => (
                   <div key={f.frame} style={styles.packetBox}>
                     <div>frame {f.frame}</div>
                     <div>p1InputMask: {f.p1InputMask}</div>
@@ -1065,18 +1024,20 @@ export default function App() {
 
           <section style={styles.panel}>
             <h2 style={styles.h2}>Transcript export</h2>
+            <div style={styles.sub}>
+              {packets.length} packets · {canonicalFrames.length} canonical frames · head {short(finalFrameHash, 18)}
+            </div>
             <div style={styles.row}>
-              <button style={styles.smallButton} onClick={() => void copy(transcriptJson)}>
+              <button style={styles.smallButton} onClick={() => void copy(JSON.stringify(buildTranscript(), null, 2))}>
                 Copy Transcript
               </button>
               <button
                 style={styles.smallButton}
-                onClick={() => downloadText(`${matchId}-transcript.json`, transcriptJson)}
+                onClick={() => downloadText(`transcript-${matchId.slice(0, 10)}.json`, JSON.stringify(buildTranscript(), null, 2))}
               >
                 Download JSON
               </button>
             </div>
-            <pre style={styles.pre}>{transcriptJson}</pre>
           </section>
 
           <section style={styles.panel}>
