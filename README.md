@@ -159,6 +159,17 @@ Why the history is enough: every packet a player sent is signed by their own del
 
 This runs on any EVM chain including Ethereum L1: nothing on-chain verifies P-256; all on-chain checks are secp256k1 via `ecrecover`.
 
+Security roadmap — anti-lookahead (commit–reveal): with input-delay netcode both
+players broadcast inputs a few frames ahead, so a stalling cheater could peek up
+to INPUT_DELAY frames (~66ms at delay 2) of the opponent's committed inputs
+before sending their own. For staked/competitive play this is closed with a
+commit–reveal exchange: send `keccak256(matchId, frame, player, inputMask, nonce)`
+first, reveal `inputMask`+`nonce` only after both commits are exchanged. The
+nonce is required because a 4-bit input is otherwise trivially brute-forced. This
+is a netcode + transcript-format change (and the dispute proof if the property
+must be provable); it does not affect the base simulation or the happy-path
+escrow. Deferred until real stakes.
+
 Known limitation (next dispute type): the continuation proof catches any "the match didn't end here" lie. A claim at the *true* final frame but with a *wrong outcome* would additionally need an on-chain replay/fraud proof of that final transition; that is intentionally out of scope for this cut.
 
 ## Local on-chain testing

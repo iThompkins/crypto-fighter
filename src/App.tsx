@@ -813,7 +813,7 @@ export default function App() {
       <div style={styles.wrap}>
         <div style={styles.leftCol}>
           <section style={styles.panel}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <h1 style={styles.h1}>Crypto Fighter</h1>
               <button style={styles.buttonSecondary} onClick={() => setDevMode((v) => !v)}>
                 {devMode ? "Dev mode" : "Regular mode"}
@@ -1249,7 +1249,9 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100%",
     margin: "0 auto",
     display: "grid",
-    gridTemplateColumns: "1.2fr 0.8fr",
+    // minmax(0, ...) lets columns shrink below their content instead of
+    // overflowing/clipping the page on narrower windows.
+    gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 0.8fr)",
     gap: 20,
     minHeight: 0,
   },
@@ -1257,6 +1259,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 16,
     alignContent: "start",
+    minWidth: 0,
     minHeight: 0,
     overflowY: "auto",
     paddingRight: 6,
@@ -1265,6 +1268,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 16,
     alignContent: "start",
+    minWidth: 0,
     minHeight: 0,
     overflowY: "auto",
     paddingRight: 6,
@@ -1274,6 +1278,8 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#111113",
     borderRadius: 16,
     padding: 16,
+    minWidth: 0,
+    overflowX: "auto",
   },
   h1: {
     margin: 0,
