@@ -40,6 +40,7 @@ export default function App() {
   const [replayFrame, setReplayFrame] = useState(0);
   const [isReplayPlaying, setIsReplayPlaying] = useState(false);
   const [devMode, setDevMode] = useState(false);
+  const [arenaScale, setArenaScale] = useState(1);
 
   // On-chain settlement (MetaMask main wallet).
   const [mainWalletAddress, setMainWalletAddress] = useState("");
@@ -56,6 +57,7 @@ export default function App() {
   const localSlotRef = useRef<PlayerSlot>(localSlot);
   const remoteWalletPubKeyRef = useRef(remoteWalletPubKey);
 
+  const arenaWrapRef = useRef<HTMLDivElement>(null);
   const peerRef = useRef<Peer | null>(null);
   const connRef = useRef<DataConnection | null>(null);
   const intervalRef = useRef<number | null>(null);
@@ -134,6 +136,21 @@ export default function App() {
       connRef.current?.close?.();
       peerRef.current?.destroy?.();
     };
+  }, []);
+
+  // Scale the fixed 720x360 stage to fill its container (internal coordinates
+  // stay the same, so game logic/verification are unaffected).
+  useEffect(() => {
+    const el = arenaWrapRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      if (w > 0) setArenaScale(Math.min(1.7, Math.max(0.4, w / WIDTH)));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   function updateMatchId(nextMatchId: string) {
@@ -914,24 +931,25 @@ export default function App() {
                 {outcomeText} · frame {displayState.frame} · HP {displayState.p1.hp}–{displayState.p2.hp}
               </div>
             ) : null}
-            <div style={styles.arena}>
-              <div style={{ ...styles.floor, top: FLOOR_Y }} />
+            <div ref={arenaWrapRef} style={{ width: "100%" }}>
+              <div style={{ ...styles.arena, width: WIDTH * arenaScale, height: HEIGHT * arenaScale, margin: "0 auto" }}>
+              <div style={{ ...styles.floor, top: FLOOR_Y * arenaScale }} />
               <div
                 style={{
                   ...styles.p1,
-                  left: displayState.p1.x,
-                  top: displayState.p1.y,
-                  width: displayState.p1.w,
-                  height: displayState.p1.h,
+                  left: displayState.p1.x * arenaScale,
+                  top: displayState.p1.y * arenaScale,
+                  width: displayState.p1.w * arenaScale,
+                  height: displayState.p1.h * arenaScale,
                 }}
               />
               <div
                 style={{
                   ...styles.p2,
-                  left: displayState.p2.x,
-                  top: displayState.p2.y,
-                  width: displayState.p2.w,
-                  height: displayState.p2.h,
+                  left: displayState.p2.x * arenaScale,
+                  top: displayState.p2.y * arenaScale,
+                  width: displayState.p2.w * arenaScale,
+                  height: displayState.p2.h * arenaScale,
                 }}
               />
 
@@ -939,10 +957,10 @@ export default function App() {
                 <div
                   style={{
                     ...styles.p1Attack,
-                    left: p1AttackRect.x,
-                    top: p1AttackRect.y,
-                    width: p1AttackRect.w,
-                    height: p1AttackRect.h,
+                    left: p1AttackRect.x * arenaScale,
+                    top: p1AttackRect.y * arenaScale,
+                    width: p1AttackRect.w * arenaScale,
+                    height: p1AttackRect.h * arenaScale,
                   }}
                 />
               )}
@@ -950,13 +968,14 @@ export default function App() {
                 <div
                   style={{
                     ...styles.p2Attack,
-                    left: p2AttackRect.x,
-                    top: p2AttackRect.y,
-                    width: p2AttackRect.w,
-                    height: p2AttackRect.h,
+                    left: p2AttackRect.x * arenaScale,
+                    top: p2AttackRect.y * arenaScale,
+                    width: p2AttackRect.w * arenaScale,
+                    height: p2AttackRect.h * arenaScale,
                   }}
                 />
               )}
+              </div>
             </div>
 
             <div style={styles.grid3}>
