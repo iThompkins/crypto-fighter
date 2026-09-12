@@ -12,6 +12,18 @@ import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlo
 // Keys the game consumes; preventDefault so arrows/space don't scroll the page.
 const GAME_KEYS = new Set(["a", "d", "w", "arrowleft", "arrowright", "arrowup", " ", "f", "j", "k", "/"]);
 
+function createPeer() {
+  const host = import.meta.env.VITE_PEER_HOST;
+  if (!host) return new Peer();
+
+  return new Peer({
+    host,
+    port: Number(import.meta.env.VITE_PEER_PORT || 9000),
+    path: import.meta.env.VITE_PEER_PATH || "/",
+    secure: import.meta.env.VITE_PEER_SECURE === "true",
+  });
+}
+
 export default function App() {
   const [state, setState] = useState<GameState>(initialState());
   const [matchId, setMatchId] = useState(makeMatchId);
@@ -178,7 +190,7 @@ export default function App() {
       peerRef.current?.destroy?.();
       connRef.current?.close?.();
 
-      const peer = new Peer();
+      const peer = createPeer();
       peerRef.current = peer;
       setRole(as);
       updateLocalSlot(as === "host" ? 1 : 2);
@@ -932,9 +944,10 @@ export default function App() {
               </div>
             ) : null}
             <div ref={arenaWrapRef} style={{ width: "100%" }}>
-              <div style={{ ...styles.arena, width: WIDTH * arenaScale, height: HEIGHT * arenaScale, margin: "0 auto" }}>
+              <div aria-label="Game arena" style={{ ...styles.arena, width: WIDTH * arenaScale, height: HEIGHT * arenaScale, margin: "0 auto" }}>
               <div style={{ ...styles.floor, top: FLOOR_Y * arenaScale }} />
               <div
+                aria-label="Player 1 fighter"
                 style={{
                   ...styles.p1,
                   left: displayState.p1.x * arenaScale,
@@ -944,6 +957,7 @@ export default function App() {
                 }}
               />
               <div
+                aria-label="Player 2 fighter"
                 style={{
                   ...styles.p2,
                   left: displayState.p2.x * arenaScale,
