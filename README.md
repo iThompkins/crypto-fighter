@@ -203,9 +203,9 @@ claimResult requires an Active match, participant caller, no existing result cla
 
 disputeResult is limited to the other participant while block.timestamp <= the deadline. It requires two packets at claimedFinalFrame + 1, slots 1/2, stored match ID, prevSelfHash links to claimed packet heads, and signatures recovering to stored session keys. It does **not** check prevOppHash, mask range, canonical-frame chain, state, terminality, or claimed outcome. Success awards the pot to the disputer and records counters.
 
-That continuation proof is **unsound with delayed inputs** because signed packets may never have executed.
+That continuation condition does **not** prove execution and is unsound with delayed inputs because signed packets may never have executed.
 
-finalizeResult is permissionless while block.timestamp >= the deadline and pays the trusted outcome: P1/P2 gets the two-stake pot; Tie splits it with P1 getting integer half and P2 any one-wei remainder. Because dispute and finalization are both permitted at the exact deadline timestamp, transaction ordering decides which succeeds at equality. Stake is zeroed before transfers and settlement paths use a simple reentrancy guard.
+finalizeResult is permissionless only while block.timestamp > the deadline and pays the trusted outcome: P1/P2 gets the two-stake pot; Tie splits it with P1 getting integer half and P2 any one-wei remainder. The deadline is inclusive for disputes: at the exact timestamp dispute remains available and finalization reverts; finalization begins one timestamp tick later. Stake is zeroed before transfers and settlement paths use a simple reentrancy guard.
 
 ### Timeout and cancellation
 

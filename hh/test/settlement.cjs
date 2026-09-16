@@ -49,6 +49,56 @@ async function openMatch(arena, p1, p2, stake, windowSec = 24 * 3600) {
   return { matchId, challengeId, p1Session, p2Session };
 }
 
+async function openClaimedMatch() {
+  const [p1, p2, finalizer] = await ethers.getSigners();
+  const stake = ethers.parseEther("1");
+  const arena = await deploy();
+  const { matchId, challengeId, p1Session, p2Session } =
+    await openMatch(arena, p1, p2, stake);
+  const finalFrame = 10;
+  const p1Head = rand32();
+  const p2Head = rand32();
+
+  await (await arena
+    .connect(p1)
+    .claimResult(challengeId, Outcome.P1, finalFrame, rand32(), p1Head, p2Head)).wait();
+
+  const challenge = await arena.getChallenge(challengeId);
+  const nextFrame = finalFrame + 1;
+  const p1Next = {
+    matchId,
+    frame: nextFrame,
+    player: 1,
+    inputMask: 2,
+    prevSelfHash: p1Head,
+    prevOppHash: p2Head,
+  };
+  const p2Next = {
+    matchId,
+    frame: nextFrame,
+    player: 2,
+    inputMask: 1,
+    prevSelfHash: p2Head,
+    prevOppHash: p1Head,
+  };
+
+  return {
+    arena,
+    challengeId,
+    deadline: challenge.resultDeadline,
+    finalizer,
+    p1,
+    p2,
+    p1Packet: packetTuple(p1Next, signPacket(p1Session, p1Next)),
+    p2Packet: packetTuple(p2Next, signPacket(p2Session, p2Next)),
+    stake,
+  };
+}
+
+async function setNextBlockTimestamp(timestamp) {
+  await ethers.provider.send("evm_setNextBlockTimestamp", [Number(timestamp)]);
+}
+
 describe("CryptoFighterArena settlement", function () {
   it("rejects a dispute window shorter than 24 hours", async function () {
     const [p1, p2] = await ethers.getSigners();
@@ -105,6 +155,72 @@ describe("CryptoFighterArena settlement", function () {
     assert.ok(finalized, "MatchFinalized emitted");
     assert.equal(finalized.args.outcome, BigInt(Outcome.P1));
     assert.equal(finalized.args.winner, p1.address);
+  });
+
+  it("at resultDeadline: finalization reverts with window open", async function () {
+    const { arena, challengeId, deadline, finalizer } = await openClaimedMatch();
+
+    await setNextBlockTimestamp(deadline);
+    await assert.rejects(
+      arena.connect(finalizer).finalizeResult(challengeId),
+      /window open/
+    );
+
+    const block = await ethers.provider.getBlock("latest");
+    assert.equal(BigInt(block.timestamp), deadline, "revert mined at exact deadline");
+  });
+
+  it("at resultDeadline: a valid opponent dispute succeeds and pays once", async function () {
+    const { arena, challengeId, deadline, p1Packet, p2Packet, p2, stake } =
+      await openClaimedMatch();
+    const before = await ethers.provider.getBalance(p2.address);
+
+    await setNextBlockTimestamp(deadline);
+    const rc = await (await arena
+      .connect(p2)
+      .disputeResult(challengeId, p1Packet, p2Packet)).wait();
+    const after = await ethers.provider.getBalance(p2.address);
+    const block = await ethers.provider.getBlock(rc.blockNumber);
+    const finalized = rc.logs
+      .map((l) => { try { return arena.interface.parseLog(l); } catch { return null; } })
+      .filter((e) => e && e.name === "MatchFinalized");
+
+    assert.equal(BigInt(block.timestamp), deadline, "dispute mined at exact deadline");
+    assert.equal(after - before + rc.gasUsed * rc.gasPrice, stake * 2n, "disputer receives pot once");
+    assert.equal(finalized.length, 1, "one MatchFinalized event");
+    assert.equal(await ethers.provider.getBalance(await arena.getAddress()), 0n, "escrow drained once");
+  });
+
+  it("after resultDeadline: dispute reverts with window closed", async function () {
+    const { arena, challengeId, deadline, p1Packet, p2Packet, p2 } =
+      await openClaimedMatch();
+
+    await setNextBlockTimestamp(deadline + 1n);
+    await assert.rejects(
+      arena.connect(p2).disputeResult(challengeId, p1Packet, p2Packet),
+      /window closed/
+    );
+
+    const block = await ethers.provider.getBlock("latest");
+    assert.equal(BigInt(block.timestamp), deadline + 1n, "revert mined immediately after deadline");
+  });
+
+  it("after resultDeadline: permissionless finalization succeeds", async function () {
+    const { arena, challengeId, deadline, finalizer, p1, stake } = await openClaimedMatch();
+    const before = await ethers.provider.getBalance(p1.address);
+
+    await setNextBlockTimestamp(deadline + 1n);
+    const rc = await (await arena.connect(finalizer).finalizeResult(challengeId)).wait();
+    const after = await ethers.provider.getBalance(p1.address);
+    const block = await ethers.provider.getBlock(rc.blockNumber);
+    const finalized = rc.logs
+      .map((l) => { try { return arena.interface.parseLog(l); } catch { return null; } })
+      .filter((e) => e && e.name === "MatchFinalized");
+
+    assert.notEqual(finalizer.address, p1.address, "finalizer is not the winner");
+    assert.equal(BigInt(block.timestamp), deadline + 1n, "finalization mined immediately after deadline");
+    assert.equal(after - before, stake * 2n, "winner receives the pot");
+    assert.equal(finalized.length, 1, "one MatchFinalized event");
   });
 
   it("dispute: a false claim is trumped by the signed history (auto-loss)", async function () {

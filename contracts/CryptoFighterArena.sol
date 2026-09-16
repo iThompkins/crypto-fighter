@@ -278,10 +278,10 @@ contract CryptoFighterArena {
         emit ChallengeJoined(challengeId, msg.sender, p2SessionKey);
     }
 
-    /// @notice Optimistically claim the match result. No opponent co-signature is
-    ///         required: the history is self-authenticating (each frame carries the
-    ///         opponent's own session-key signature), so a false claim is cheaply
-    ///         disproven within the response window via disputeResult.
+    /// @notice Optimistically claim the match result without an opponent co-signature
+    ///         or proof that the claimed state was executed. The signed packets accepted
+    ///         by disputeResult authenticate session keys and chain fields only; delayed
+    ///         pre-signed packets can satisfy that check without proving execution.
     /// @param finalHead Canonical frame hash at the claimed final frame.
     /// @param p1Head/p2Head Each player's packet-chain head at the claimed final frame,
     ///        used to bind a continuation disproof.
@@ -317,20 +317,20 @@ contract CryptoFighterArena {
         emit ResultClaimed(challengeId, msg.sender, outcome, finalFrame, finalHead, c.resultDeadline);
     }
 
-    /// @notice Finalize an unchallenged result claim after its window elapses.
+    /// @notice Finalize an unchallenged result claim after the inclusive dispute window elapses.
     function finalizeResult(uint256 challengeId) external nonReentrant {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(c.resultClaimant != address(0), "no claim");
-        require(block.timestamp >= c.resultDeadline, "window open");
+        require(block.timestamp > c.resultDeadline, "window open");
 
         _finalize(challengeId, c.claimedOutcome);
     }
 
-    /// @notice Disprove a result claim by revealing a validly co-signed packet pair for
-    ///         the frame *after* the claimed final frame. Both packets must be signed by
-    ///         the two committed session keys, so a challenger cannot forge them: their
-    ///         existence proves the match did not end where the claimant asserted.
+    /// @notice Challenge a result claim with a packet pair for the frame *after* the
+    ///         claimed final frame, signed by the two committed session keys.
+    /// @dev Packet existence authenticates the signers and checked chain fields but does
+    ///      not prove that the packets were executed or that the claimed state was terminal.
     function disputeResult(
         uint256 challengeId,
         SignedPacket calldata p1Next,
@@ -349,15 +349,17 @@ contract CryptoFighterArena {
 
         // Each revealed packet must self-chain onto the claimant's committed
         // packet head for that player at the final frame. A valid signature over
-        // a packet chaining past the claimed end proves the match continued.
-        // (Opponent-ack linkage spans INPUT_DELAY frames and isn't checked here.)
+        // a packet chaining past the claimed end satisfies this narrow dispute
+        // condition; it does not prove execution. (Opponent-ack linkage spans
+        // INPUT_DELAY frames and isn't checked here.)
         require(p1Next.prevSelfHash == c.claimedP1Head, "p1 self chain");
         require(p2Next.prevSelfHash == c.claimedP2Head, "p2 self chain");
 
         require(_recoverPacket(p1Next) == c.p1SessionKey, "bad P1 sig");
         require(_recoverPacket(p2Next) == c.p2SessionKey, "bad P2 sig");
 
-        // Claim disproven: the match provably continued past the claimed end.
+        // The claim is disputed under the accepted packet condition; this is not
+        // proof that the packets executed or that the claimant's outcome was false.
         address slashed = c.resultClaimant;
         playerStats[slashed].falseResultClaims += 1;
         playerStats[msg.sender].resultDisputesWon += 1;
