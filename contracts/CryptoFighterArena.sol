@@ -3,9 +3,8 @@ pragma solidity ^0.8.24;
 
 /// @notice Escrow, dispute, and reputation skeleton for Crypto Fighter.
 /// @dev This intentionally does not replay the whole match on-chain yet.
-///      Normal path: both players sign a final result and settle cheaply.
-///      Dispute path: one player claims timeout from a transcript head; the other
-///      must continue the signed chain before the deadline or forfeit.
+///      Result claims are optimistic and remain experimental until an execution
+///      proof can distinguish canonical continuation from delayed pre-signed inputs.
 contract CryptoFighterArena {
     enum MatchStatus {
         None,
@@ -86,7 +85,7 @@ contract CryptoFighterArena {
         uint64 lastActiveAt;
     }
 
-    uint64 public constant DEFAULT_RESPONSE_WINDOW_SECONDS = 24 hours;
+    uint64 public constant MIN_RESPONSE_WINDOW_SECONDS = 24 hours;
 
     uint256 public nextChallengeId = 1;
     mapping(uint256 => Challenge) internal challenges;
@@ -194,11 +193,15 @@ contract CryptoFighterArena {
         require(matchId != bytes32(0), "matchId required");
         require(rulesHash != bytes32(0), "rulesHash required");
         require(p1SessionKey != address(0), "session key required");
+        require(
+            responseWindowSeconds >= MIN_RESPONSE_WINDOW_SECONDS,
+            "response window too short"
+        );
 
         challengeId = nextChallengeId++;
-        // Literal window. 0 = finalize immediately (no dispute window); larger
-        // values give the loser time to disprove a false claim. DEFAULT is only
-        // a suggested value for adversarial/production use.
+        // A result claim is always challengeable for at least 24 hours. Until
+        // the execution-proof protocol is complete, shortening this window
+        // would let an unverified claim finalize before an opponent can react.
         uint64 window = responseWindowSeconds;
 
         bytes32 matchContextHash = keccak256(

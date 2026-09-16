@@ -1,4 +1,4 @@
-import { hashFrameFields, hashJson, hashPacketFields, verifyPacket, ZERO32 } from "./crypto";
+import { addressFromPublicKey, hashFrameFields, hashJson, hashPacketFields, verifyPacket, ZERO32 } from "./crypto";
 import { initialState, transition } from "./game";
 import type { GameState, MatchTranscript, SignedInputPacket } from "./types";
 
@@ -36,6 +36,32 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
 
   if (transcript.version !== 1) errors.push("unsupported transcript version");
   if (!transcript.matchId) errors.push("missing matchId");
+
+  const transcriptPlayers = [transcript.players?.p1, transcript.players?.p2] as const;
+  for (const [index, player] of transcriptPlayers.entries()) {
+    const expectedSlot = (index + 1) as 1 | 2;
+    if (!player) {
+      errors.push(`missing P${expectedSlot} identity`);
+      continue;
+    }
+    if (player.slot !== expectedSlot) errors.push(`P${expectedSlot} identity has wrong slot`);
+    if (!player.publicKey) {
+      errors.push(`missing P${expectedSlot} public key`);
+      continue;
+    }
+    if (!player.address) {
+      errors.push(`missing P${expectedSlot} session address`);
+      continue;
+    }
+    try {
+      const derived = addressFromPublicKey(player.publicKey);
+      if (derived.toLowerCase() !== player.address.toLowerCase()) {
+        errors.push(`P${expectedSlot} session address does not match public key`);
+      }
+    } catch {
+      errors.push(`P${expectedSlot} public key is malformed`);
+    }
+  }
 
   for (const packet of transcript.packets ?? []) {
     const key = packetKey(packet);
@@ -82,7 +108,7 @@ export async function verifyTranscript(transcript: MatchTranscript): Promise<Tra
       }
 
       const expectedPubKey = packet.player === 1 ? transcript.players?.p1?.publicKey : transcript.players?.p2?.publicKey;
-      if (expectedPubKey && packet.publicKey !== expectedPubKey) {
+      if (!expectedPubKey || packet.publicKey !== expectedPubKey) {
         errors.push(`frame ${frame} P${packet.player}: public key mismatch`);
       }
 

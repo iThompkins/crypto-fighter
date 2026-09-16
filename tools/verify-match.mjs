@@ -260,6 +260,32 @@ async function verifyTranscript(transcript) {
   if (transcript.version !== 1) errors.push("unsupported transcript version");
   if (!transcript.matchId) errors.push("missing matchId");
 
+  const transcriptPlayers = [transcript.players?.p1, transcript.players?.p2];
+  for (const [index, player] of transcriptPlayers.entries()) {
+    const expectedSlot = index + 1;
+    if (!player) {
+      errors.push(`missing P${expectedSlot} identity`);
+      continue;
+    }
+    if (player.slot !== expectedSlot) errors.push(`P${expectedSlot} identity has wrong slot`);
+    if (!player.publicKey) {
+      errors.push(`missing P${expectedSlot} public key`);
+      continue;
+    }
+    if (!player.address) {
+      errors.push(`missing P${expectedSlot} session address`);
+      continue;
+    }
+    try {
+      const derived = addressFromPublicKey(player.publicKey);
+      if (derived.toLowerCase() !== player.address.toLowerCase()) {
+        errors.push(`P${expectedSlot} session address does not match public key`);
+      }
+    } catch {
+      errors.push(`P${expectedSlot} public key is malformed`);
+    }
+  }
+
   for (const packet of transcript.packets ?? []) {
     const key = `${packet.frame}:${packet.player}`;
     if (packetsByFrame.has(key)) errors.push(`duplicate packet ${key}`);
@@ -293,7 +319,7 @@ async function verifyTranscript(transcript) {
       if (packet.prevOppHash !== expectedOpp) errors.push(`frame ${frame} P${packet.player}: broken opponent acknowledgement`);
 
       const expectedPubKey = packet.player === 1 ? transcript.players?.p1?.publicKey : transcript.players?.p2?.publicKey;
-      if (expectedPubKey && packet.publicKey !== expectedPubKey) errors.push(`frame ${frame} P${packet.player}: public key mismatch`);
+      if (!expectedPubKey || packet.publicKey !== expectedPubKey) errors.push(`frame ${frame} P${packet.player}: public key mismatch`);
 
       const signatureOk = verifyPacketSignature(packet);
       if (!signatureOk) errors.push(`frame ${frame} P${packet.player}: invalid signature`);

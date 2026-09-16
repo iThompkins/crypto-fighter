@@ -34,7 +34,7 @@ async function deploy() {
   return arena;
 }
 
-async function openMatch(arena, p1, p2, stake, windowSec = 3600) {
+async function openMatch(arena, p1, p2, stake, windowSec = 24 * 3600) {
   const matchId = rand32();
   const rulesHash = ethers.id("rules-v1");
   const p1Session = ethers.Wallet.createRandom();
@@ -50,22 +50,32 @@ async function openMatch(arena, p1, p2, stake, windowSec = 3600) {
 }
 
 describe("CryptoFighterArena settlement", function () {
-  it("instant window: window=0 lets the winner finalize immediately", async function () {
+  it("rejects a dispute window shorter than 24 hours", async function () {
     const [p1, p2] = await ethers.getSigners();
     const stake = ethers.parseEther("1");
     const arena = await deploy();
-    const { challengeId } = await openMatch(arena, p1, p2, stake, 0);
-    await (await arena.connect(p1).claimResult(challengeId, Outcome.P1, 50, rand32(), rand32(), rand32())).wait();
-    await (await arena.connect(p1).finalizeResult(challengeId)).wait(); // no time advance needed
-    const ch = await arena.getChallenge(challengeId);
-    assert.equal(ch.status, 3n, "finalized immediately with window=0");
+    const matchId = rand32();
+    const rulesHash = ethers.id("rules-v1");
+    const session = ethers.Wallet.createRandom();
+
+    await assert.rejects(
+      arena.connect(p1).challenge(
+        matchId,
+        rulesHash,
+        session.address,
+        p2.address,
+        24 * 3600 - 1,
+        { value: stake }
+      ),
+      /response window too short/
+    );
   });
 
   it("happy path: claim + finalize pays the pot to the winner", async function () {
     const [p1, p2] = await ethers.getSigners();
     const stake = ethers.parseEther("1");
     const arena = await deploy();
-    const { challengeId } = await openMatch(arena, p1, p2, stake, 3600);
+    const { challengeId } = await openMatch(arena, p1, p2, stake, 24 * 3600);
 
     const finalHead = rand32();
     await (await arena

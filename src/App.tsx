@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Peer, { type DataConnection } from "peerjs";
-import { createSessionWallet, hashFrameFields, hashJson, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
+import { addressFromPublicKey, createSessionWallet, hashFrameFields, hashJson, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
 import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, INPUT_DELAY, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
 import { short } from "./format";
 import { arena, connectWallet, outcomeFromWinner, rulesHash, stakeWei } from "./chain";
@@ -11,6 +11,14 @@ import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlo
 
 // Keys the game consumes; preventDefault so arrows/space don't scroll the page.
 const GAME_KEYS = new Set(["a", "d", "w", "arrowleft", "arrowright", "arrowup", " ", "f", "j", "k", "/"]);
+
+function sessionIdentityMatches(address: string, publicKey: string) {
+  try {
+    return addressFromPublicKey(publicKey).toLowerCase() === address.toLowerCase();
+  } catch {
+    return false;
+  }
+}
 
 function createPeer() {
   const host = import.meta.env.VITE_PEER_HOST;
@@ -59,13 +67,14 @@ export default function App() {
   const [chainLabel, setChainLabel] = useState("");
   const [arenaAddress, setArenaAddress] = useState("");
   const [stakeEth, setStakeEth] = useState("0.01");
-  const [responseWindowSec, setResponseWindowSec] = useState("0");
+  const [responseWindowSec, setResponseWindowSec] = useState("86400");
   const [expectedOpponent, setExpectedOpponent] = useState("");
   const [onchainChallengeId, setOnchainChallengeId] = useState("");
   const mainSignerRef = useRef<Signer | null>(null);
 
   const matchIdRef = useRef(matchId);
   const stateRef = useRef(state);
+  const walletRef = useRef<SessionWallet | null>(wallet);
   const localSlotRef = useRef<PlayerSlot>(localSlot);
   const remoteWalletPubKeyRef = useRef(remoteWalletPubKey);
 
@@ -106,7 +115,10 @@ export default function App() {
     let mounted = true;
     (async () => {
       const w = await createSessionWallet();
-      if (mounted) setWallet(w);
+      if (mounted) {
+        updateWallet(w);
+        sendHello();
+      }
     })();
     return () => {
       mounted = false;
@@ -170,6 +182,11 @@ export default function App() {
     setMatchId(nextMatchId);
   }
 
+  function updateWallet(nextWallet: SessionWallet) {
+    walletRef.current = nextWallet;
+    setWallet(nextWallet);
+  }
+
   function updateLocalSlot(nextSlot: PlayerSlot) {
     localSlotRef.current = nextSlot;
     setLocalSlot(nextSlot);
@@ -178,6 +195,18 @@ export default function App() {
   function updateRemoteWalletPubKey(nextPubKey: string) {
     remoteWalletPubKeyRef.current = nextPubKey;
     setRemoteWalletPubKey(nextPubKey);
+  }
+
+  function sendHello(conn = connRef.current) {
+    const currentWallet = walletRef.current;
+    if (!conn?.open || !currentWallet) return;
+    conn.send({
+      type: "HELLO",
+      matchId: matchIdRef.current,
+      fromSlot: localSlotRef.current,
+      walletAddress: currentWallet.address,
+      publicKey: currentWallet.publicKey,
+    } satisfies NetEnvelope);
   }
 
   const log = useCallback((line: string) => {
@@ -220,16 +249,8 @@ export default function App() {
       setIsConnected(true);
       log(`connection open to ${conn.peer}`);
 
-      if (wallet) {
-        const hello: NetEnvelope = {
-          type: "HELLO",
-          matchId,
-          fromSlot: slotForLocal,
-          walletAddress: wallet.address,
-          publicKey: wallet.publicKey,
-        };
-        conn.send(hello);
-      }
+      updateLocalSlot(slotForLocal);
+      sendHello(conn);
     });
 
     conn.on("data", (raw: unknown) => {
@@ -317,6 +338,15 @@ export default function App() {
 
   async function handleNetMessage(msg: NetEnvelope) {
     if (msg.type === "HELLO") {
+      const expectedRemoteSlot: PlayerSlot = localSlotRef.current === 1 ? 2 : 1;
+      if (msg.fromSlot !== expectedRemoteSlot) {
+        log(`rejected HELLO: expected P${expectedRemoteSlot}, got P${msg.fromSlot}`);
+        return;
+      }
+      if (!sessionIdentityMatches(msg.walletAddress, msg.publicKey)) {
+        log("rejected HELLO: session address does not match public key");
+        return;
+      }
       setRemoteWalletAddress(msg.walletAddress);
       updateRemoteWalletPubKey(msg.publicKey);
 
@@ -340,8 +370,14 @@ export default function App() {
 
     if (msg.type === "RESET_MATCH") {
       log("remote requested reset");
-      await resetLocal(false);
-      updateMatchId(msg.matchId);
+      if (!sessionIdentityMatches(msg.walletAddress, msg.publicKey)) {
+        log("rejected reset: session address does not match public key");
+        return;
+      }
+      await resetLocal(false, msg.matchId);
+      setRemoteWalletAddress(msg.walletAddress);
+      updateRemoteWalletPubKey(msg.publicKey);
+      sendHello();
       return;
     }
 
@@ -585,9 +621,9 @@ export default function App() {
     setIsReplayPlaying(false);
   }
 
-  async function resetLocal(pushRemote = true) {
+  async function resetLocal(pushRemote = true, adoptedMatchId?: string) {
     const newWallet = await createSessionWallet();
-    setWallet(newWallet);
+    updateWallet(newWallet);
     setState(initialState());
     setPackets([]);
     setCanonicalFrames([]);
@@ -595,17 +631,23 @@ export default function App() {
     setFinalFrameHash(ZERO32);
     setFinalStateHash("");
     setRemoteWalletAddress("");
-    setRemoteWalletPubKey("");
+    updateRemoteWalletPubKey("");
     setLastError("");
 
     primeNetcode();
     setIsRunning(false);
 
-    const nextMatchId = makeMatchId();
+    const nextMatchId = adoptedMatchId ?? makeMatchId();
     updateMatchId(nextMatchId);
 
     if (pushRemote && connRef.current?.open) {
-      connRef.current.send({ type: "RESET_MATCH", matchId: nextMatchId } satisfies NetEnvelope);
+      connRef.current.send({
+        type: "RESET_MATCH",
+        matchId: nextMatchId,
+        fromSlot: localSlotRef.current,
+        walletAddress: newWallet.address,
+        publicKey: newWallet.publicKey,
+      } satisfies NetEnvelope);
     }
   }
 
@@ -1166,7 +1208,7 @@ export default function App() {
                 style={styles.input}
                 value={responseWindowSec}
                 onChange={(e) => setResponseWindowSec(e.target.value)}
-                placeholder="Dispute window (seconds, 0 = instant finalize)"
+                placeholder="Dispute window (seconds, minimum 86400)"
               />
             </div>
             <div style={styles.row}>

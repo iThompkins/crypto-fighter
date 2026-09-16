@@ -102,4 +102,7 @@ export type NetEnvelope =
   | {
       type: "RESET_MATCH";
       matchId: string;
+      fromSlot: PlayerSlot;
+      walletAddress: string;
+      publicKey: string;
     };
