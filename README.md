@@ -80,7 +80,9 @@ CSS scaling does not enter simulation or hashing. A loaded replay draws its sele
 | 2 | 4 | attack |
 | 3 | 8 | up/jump |
 
-Higher bits are ignored by simulation; realtime validation, transcript verification, and Solidity do not reject them. This is a validation gap.
+Transcript v1 permits exactly the unsigned integer values 0 through 15. Every combination of the four known bits is valid, including left+right; higher bits are invalid rather than ignored. Browser/runtime code applies `typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 0x0f` without coercing, rounding, truncating, clamping, or masking a value into range.
+
+JSON validation is over parsed JavaScript binary64 values. A source number is therefore accepted when its parsed value is a safe integer in 0..15, regardless of spelling or pre-conversion rounding/underflow; for example, `1e-400` parses as zero and is accepted, while `1e400` parses as infinity and is rejected. Lexical JSON canonicalization is outside v1.
 
 ### SignedInputPacket
 
@@ -172,13 +174,15 @@ Delay creates a protocol gap: a valid future packet may have been signed before 
 
 ### Realtime
 
-[App.tsx](src/App.tsx) checks remote slot, match ID, stale/future window, public-key continuity after HELLO, recomputed hash, sequential self-chain, F-2 acknowledgement, conflicting buffered frame/slot packets, and signature recovery. Local packets are constructed but not run through this remote validator. Only the next complete pair advances.
+[App.tsx](src/App.tsx) first rejects a remote packet whose input mask is not a valid v1 value, before hashing or buffering it. It then checks remote slot, match ID, stale/future window, public-key continuity after HELLO, recomputed hash, sequential self-chain, F-2 acknowledgement, conflicting buffered frame/slot packets, and signature recovery. Local packets are produced from the four canonical bits and are not run through this remote validator. Only the next complete pair advances.
 
 ### Transcript replay
 
-[verifier.ts](src/verifier.ts) and [verify-match.mjs](tools/verify-match.mjs) derive declared session addresses, require slots, flag duplicate frame/player keys, walk frames 1 through the highest canonical frame, validate packet hashes/chains/signatures and F-inputDelay acknowledgements, rebuild frame hashes, replay transition, and—when the corresponding final fields are present—compare frame/hash/state hash/HP/winner/roundOver.
+[verifier.ts](src/verifier.ts) and [verify-match.mjs](tools/verify-match.mjs) first scan every packet mask, then every canonical-frame P1 and P2 mask, including entries outside the walked frame range. Any invalid or missing mask fails with a location-bearing error before packet indexing, hashing, signature verification, or replay. They then derive declared session addresses, require slots, flag duplicate frame/player keys, walk frames 1 through the highest canonical frame, validate packet hashes/chains/signatures and F-inputDelay acknowledgements, rebuild frame hashes, replay transition, and—when the corresponding final fields are present—compare frame/hash/state hash/HP/winner/roundOver.
 
-They do not require a complete final object, require a non-empty stateHash, pin declared rules to compiled constants, reject unknown input bits, prove rule negotiation, or give stateHash on-chain meaning. Extra structures outside the walked range are not schema validation. An accepted transcript is internally consistent under the checks actually reached; it is not necessarily complete and does not prove payout correctness.
+They do not require a complete final object, require a non-empty stateHash, pin declared rules to compiled constants, prove rule negotiation, or give stateHash on-chain meaning. Apart from the whole-array mask preflight, extra structures outside the walked range are not schema validation. An accepted transcript is internally consistent under the checks actually reached; it is not necessarily complete and does not prove payout correctness.
+
+This is a compatibility tightening within transcript version 1: valid masks retain the same packet/frame digests and signatures, while formerly tolerated transcripts containing unknown bits or malformed mask values now fail closed. There is no legacy coercion or permissive mode.
 
 ## Main wallets and session keys
 
@@ -201,7 +205,7 @@ join requires Open status, a caller other than P1, exactly equal stake, and a no
 
 claimResult requires an Active match, participant caller, no existing result claim, no active timeout, outcome P1/P2/Tie, and non-zero finalHead. It otherwise stores claimant-supplied outcome, final frame, frame head, and packet heads and starts the deadline.
 
-disputeResult is limited to the other participant while block.timestamp <= the deadline. It requires two packets at claimedFinalFrame + 1, slots 1/2, stored match ID, prevSelfHash links to claimed packet heads, and signatures recovering to stored session keys. It does **not** check prevOppHash, mask range, canonical-frame chain, state, terminality, or claimed outcome. Success awards the pot to the disputer and records counters.
+disputeResult is limited to the other participant while block.timestamp <= the deadline. It requires two packets at claimedFinalFrame + 1, slots 1/2, stored match ID, v1 input masks with no bits above `0x0f`, prevSelfHash links to claimed packet heads, and signatures recovering to stored session keys. It does **not** check prevOppHash, canonical-frame chain, state, terminality, or claimed outcome. Success awards the pot to the disputer and records counters.
 
 That continuation condition does **not** prove execution and is unsound with delayed inputs because signed packets may never have executed.
 
@@ -223,7 +227,7 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 | Main-wallet participants/optional P2 restriction | Enforced |
 | Non-zero identifiers/session keys and 24h minimum | Enforced |
 | Session delegation | Inferred from a main wallet committing its own session address |
-| Disclosed next packets: digest/signers/frame/slots/match/self links | Enforced only in disputeResult |
+| Disclosed next packets: digest/signers/frame/slots/match/masks/self links | Enforced only in disputeResult |
 | rulesHash contents | Opaque non-zero value; trusted |
 | Outcome, final frame, frame head, packet heads | Claimant supplied; minimal checks only |
 | Canonical chain/full transcript | Not checked |
@@ -255,7 +259,7 @@ This requires new formats, serialization, contract state machines, transition ve
 - Unauthenticated timeout hashes can produce unjustified forfeits.
 - Rules and claim fields are largely trusted; Solidity has no game verifier.
 - Packet signatures omit chain, contract, challenge, matchContextHash, and rulesHash domain; reused match IDs create ambiguity.
-- Unknown mask bits are accepted; Solidity does not explicitly enforce low-S or validate v before ecrecover.
+- Solidity does not explicitly enforce low-S or validate v before ecrecover.
 - PeerJS/browser memory are not hardened custody, privacy, availability, or DoS systems; reset/reload loses keys.
 - Input delay permits limited lookahead; commit-reveal is only proposed.
 - Both players may delegate the same session address.

@@ -1,8 +1,23 @@
 const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
 const { ethers } = require("hardhat");
 
 const Outcome = { None: 0, P1: 1, P2: 2, Tie: 3 };
 const coder = ethers.AbiCoder.defaultAbiCoder();
+const inputMaskFixture = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "../../test/fixtures/input-mask-v1.json"), "utf8")
+);
+const validBoundaryMasks = ["0", "15"].map((uintDecimal) =>
+  inputMaskFixture.vectors.find(
+    (vector) => vector.abiRepresentable && vector.validJsMask && vector.uintDecimal === uintDecimal
+  ).uintDecimal
+);
+const invalidContractMasks = [...new Set(
+  inputMaskFixture.vectors
+    .filter((vector) => vector.abiRepresentable && !vector.validJsMask)
+    .map((vector) => vector.uintDecimal)
+)];
 
 function rand32() {
   return ethers.hexlify(ethers.randomBytes(32));
@@ -49,7 +64,7 @@ async function openMatch(arena, p1, p2, stake, windowSec = 24 * 3600) {
   return { matchId, challengeId, p1Session, p2Session };
 }
 
-async function openClaimedMatch() {
+async function openClaimedMatch(p1InputMask = 2, p2InputMask = 1) {
   const [p1, p2, finalizer] = await ethers.getSigners();
   const stake = ethers.parseEther("1");
   const arena = await deploy();
@@ -69,7 +84,7 @@ async function openClaimedMatch() {
     matchId,
     frame: nextFrame,
     player: 1,
-    inputMask: 2,
+    inputMask: p1InputMask,
     prevSelfHash: p1Head,
     prevOppHash: p2Head,
   };
@@ -77,7 +92,7 @@ async function openClaimedMatch() {
     matchId,
     frame: nextFrame,
     player: 2,
-    inputMask: 1,
+    inputMask: p2InputMask,
     prevSelfHash: p2Head,
     prevOppHash: p1Head,
   };
@@ -100,6 +115,29 @@ async function setNextBlockTimestamp(timestamp) {
 }
 
 describe("CryptoFighterArena settlement", function () {
+  for (const inputMask of validBoundaryMasks) {
+    it(`accepts correctly signed boundary input mask ${inputMask}`, async function () {
+      const { arena, challengeId, p1Packet, p2Packet, p2 } =
+        await openClaimedMatch(inputMask, inputMask);
+      await (await arena.connect(p2).disputeResult(challengeId, p1Packet, p2Packet)).wait();
+    });
+  }
+
+  for (const inputMask of invalidContractMasks) {
+    for (const player of [1, 2]) {
+      it(`rejects correctly signed P${player} input mask ${inputMask}`, async function () {
+        const p1InputMask = player === 1 ? inputMask : "1";
+        const p2InputMask = player === 2 ? inputMask : "2";
+        const { arena, challengeId, p1Packet, p2Packet, p2 } =
+          await openClaimedMatch(p1InputMask, p2InputMask);
+        await assert.rejects(
+          arena.connect(p2).disputeResult(challengeId, p1Packet, p2Packet),
+          /invalid input mask/
+        );
+      });
+    }
+  }
+
   it("rejects a dispute window shorter than 24 hours", async function () {
     const [p1, p2] = await ethers.getSigners();
     const stake = ethers.parseEther("1");

@@ -1,4 +1,5 @@
 import type { Fighter, GameState } from "./types";
+import { ATTACK, LEFT, RIGHT, UP } from "./input-mask.ts";
 
 export const WIDTH = 720;
 export const HEIGHT = 360;
@@ -29,10 +30,10 @@ export const JUMP_VELOCITY = 22;
 export const GRAVITY = 2;
 
 export const INPUT = {
-  LEFT: 1,
-  RIGHT: 2,
-  ATTACK: 4,
-  UP: 8,
+  LEFT,
+  RIGHT,
+  ATTACK,
+  UP,
 } as const;
 
 function clamp(n: number, min: number, max: number) {

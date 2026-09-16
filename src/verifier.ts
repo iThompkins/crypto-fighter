@@ -1,6 +1,7 @@
-import { addressFromPublicKey, hashFrameFields, hashJson, hashPacketFields, verifyPacket, ZERO32 } from "./crypto";
-import { initialState, transition } from "./game";
-import type { GameState, MatchTranscript, SignedInputPacket } from "./types";
+import { addressFromPublicKey, hashFrameFields, hashJson, hashPacketFields, verifyPacket, ZERO32 } from "./crypto.ts";
+import { initialState, transition } from "./game.ts";
+import { isValidV1InputMask } from "./input-mask.ts";
+import type { GameState, MatchTranscript, SignedInputPacket } from "./types.ts";
 
 const ZERO_HASH = ZERO32;
 
@@ -24,7 +25,49 @@ function packetKey(packet: SignedInputPacket) {
   return `${packet.frame}:${packet.player}`;
 }
 
+function inputMaskErrors(transcript: MatchTranscript): string[] {
+  const errors: string[] = [];
+  const packets = transcript.packets ?? [];
+  const canonicalFrames = transcript.canonicalFrames ?? [];
+
+  for (let i = 0; i < packets.length; i += 1) {
+    if (!isValidV1InputMask(packets[i]?.inputMask)) {
+      errors.push(`invalid v1 input mask at packets[${i}].inputMask`);
+    }
+  }
+  for (let i = 0; i < canonicalFrames.length; i += 1) {
+    if (!isValidV1InputMask(canonicalFrames[i]?.p1InputMask)) {
+      errors.push(`invalid v1 input mask at canonicalFrames[${i}].p1InputMask`);
+    }
+    if (!isValidV1InputMask(canonicalFrames[i]?.p2InputMask)) {
+      errors.push(`invalid v1 input mask at canonicalFrames[${i}].p2InputMask`);
+    }
+  }
+
+  return errors;
+}
+
 export async function verifyTranscript(transcript: MatchTranscript): Promise<TranscriptVerificationResult> {
+  const maskErrors = inputMaskErrors(transcript);
+  if (maskErrors.length > 0) {
+    const state = initialState();
+    return {
+      ok: false,
+      errors: maskErrors,
+      states: [state],
+      replay: {
+        frame: state.frame,
+        frameHash: ZERO_HASH,
+        stateHash: ZERO_HASH,
+        p1Hp: state.p1.hp,
+        p2Hp: state.p2.hp,
+        winner: state.winner,
+        roundOver: state.roundOver,
+        packetHeads: { 1: ZERO_HASH, 2: ZERO_HASH },
+      },
+    };
+  }
+
   const errors: string[] = [];
   const packetsByFrame = new Map<string, SignedInputPacket>();
   const packetHeads: { 1: string; 2: string } = { 1: ZERO_HASH, 2: ZERO_HASH };

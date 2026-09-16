@@ -86,6 +86,7 @@ contract CryptoFighterArena {
     }
 
     uint64 public constant MIN_RESPONSE_WINDOW_SECONDS = 24 hours;
+    uint256 internal constant KNOWN_INPUT_MASK = 0x0f;
 
     uint256 public nextChallengeId = 1;
     mapping(uint256 => Challenge) internal challenges;
@@ -346,6 +347,8 @@ contract CryptoFighterArena {
         require(p1Next.frame == nextFrame && p2Next.frame == nextFrame, "wrong frame");
         require(p1Next.player == 1 && p2Next.player == 2, "wrong slots");
         require(p1Next.matchId == c.matchId && p2Next.matchId == c.matchId, "wrong match");
+        require((p1Next.inputMask & ~KNOWN_INPUT_MASK) == 0, "invalid input mask");
+        require((p2Next.inputMask & ~KNOWN_INPUT_MASK) == 0, "invalid input mask");
 
         // Each revealed packet must self-chain onto the claimant's committed
         // packet head for that player at the final frame. A valid signature over

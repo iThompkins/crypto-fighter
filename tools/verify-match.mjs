@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import * as secp from "@noble/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
@@ -20,6 +21,7 @@ const ATTACK_REACH = 22;
 const DAMAGE = 1;
 const MAX_HP = 7;
 const INPUT = { LEFT: 1, RIGHT: 2, ATTACK: 4, UP: 8 };
+const KNOWN_INPUT_MASK = 0x0f;
 const JUMP_VELOCITY = 22;
 const GRAVITY = 2;
 const ZERO_HASH = "0x" + "00".repeat(32);
@@ -248,7 +250,57 @@ function transition(prev, p1Mask, p2Mask) {
   return s;
 }
 
-async function verifyTranscript(transcript) {
+export function isValidV1InputMask(value) {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= KNOWN_INPUT_MASK
+  );
+}
+
+function inputMaskErrors(transcript) {
+  const errors = [];
+  const packets = transcript.packets ?? [];
+  const canonicalFrames = transcript.canonicalFrames ?? [];
+
+  for (let i = 0; i < packets.length; i += 1) {
+    if (!isValidV1InputMask(packets[i]?.inputMask)) {
+      errors.push(`invalid v1 input mask at packets[${i}].inputMask`);
+    }
+  }
+  for (let i = 0; i < canonicalFrames.length; i += 1) {
+    if (!isValidV1InputMask(canonicalFrames[i]?.p1InputMask)) {
+      errors.push(`invalid v1 input mask at canonicalFrames[${i}].p1InputMask`);
+    }
+    if (!isValidV1InputMask(canonicalFrames[i]?.p2InputMask)) {
+      errors.push(`invalid v1 input mask at canonicalFrames[${i}].p2InputMask`);
+    }
+  }
+
+  return errors;
+}
+
+export async function verifyTranscript(transcript) {
+  const maskErrors = inputMaskErrors(transcript);
+  if (maskErrors.length > 0) {
+    const state = initialState();
+    return {
+      ok: false,
+      errors: maskErrors,
+      replay: {
+        frame: state.frame,
+        frameHash: ZERO_HASH,
+        stateHash: ZERO_HASH,
+        p1Hp: state.p1.hp,
+        p2Hp: state.p2.hp,
+        winner: state.winner,
+        roundOver: state.roundOver,
+        packetHeads: { 1: ZERO_HASH, 2: ZERO_HASH },
+      },
+    };
+  }
+
   const errors = [];
   const packetsByFrame = new Map();
   const packetHeads = { 1: ZERO_HASH, 2: ZERO_HASH };
@@ -381,7 +433,9 @@ async function main() {
   process.exit(result.ok ? 0 : 1);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

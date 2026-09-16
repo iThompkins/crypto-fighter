@@ -7,6 +7,7 @@ import { arena, connectWallet, outcomeFromWinner, rulesHash, stakeWei } from "./
 import type { Signer } from "ethers";
 import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
+import { isValidV1InputMask } from "./input-mask";
 import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
 // Keys the game consumes; preventDefault so arrows/space don't scroll the page.
@@ -398,6 +399,7 @@ export default function App() {
     const currentState = stateRef.current;
     const expectedRemoteSlot: PlayerSlot = currentSlot === 1 ? 2 : 1;
 
+    if (!isValidV1InputMask(packet.inputMask)) return "invalid v1 input mask";
     if (packet.player !== expectedRemoteSlot) return `expected P${expectedRemoteSlot}, got P${packet.player}`;
     if (packet.matchId !== matchIdRef.current) return `wrong match context ${packet.matchId}`;
     if (packet.frame <= currentState.frame) return `stale frame ${packet.frame}`;
