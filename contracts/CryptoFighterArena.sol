@@ -6,6 +6,12 @@ pragma solidity ^0.8.24;
 ///      Result claims are optimistic and remain experimental until an execution
 ///      proof can distinguish canonical continuation from delayed pre-signed inputs.
 contract CryptoFighterArena {
+    /// @dev Temporary containment, not a settlement security proof. No override.
+    ///      This prototype must only be exercised with valueless local test funds.
+    constructor() {
+        require(block.chainid == 31337, "prototype: local chain only");
+    }
+
     enum MatchStatus {
         None,
         Open,

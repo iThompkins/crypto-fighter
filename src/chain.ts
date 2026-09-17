@@ -1,5 +1,5 @@
 import { BrowserProvider, Contract, parseEther, type Eip1193Provider, type Signer } from "ethers";
-import { hashJson } from "./crypto";
+import { hashJson } from "./crypto.ts";
 import type { GameState } from "./types";
 
 // Minimal human-readable ABI for the settlement calls the UI needs.
@@ -53,7 +53,9 @@ export async function connectWallet(): Promise<WalletConnection> {
 }
 
 export function arena(address: string, signer: Signer): Contract {
-  return new Contract(address, ARENA_ABI, signer);
+  void address;
+  void signer;
+  throw new Error("Settlement transactions are disabled until execution proofs and authenticated recovery are complete.");
 }
 
 export function stakeWei(stakeEth: string): bigint {

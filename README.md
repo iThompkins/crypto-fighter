@@ -2,7 +2,7 @@
 
 Crypto Fighter is a React/TypeScript experiment in deterministic two-player fighting-game simulation, signed input transcripts, and optimistic native-token escrow. Two browser peers exchange secp256k1-signed inputs over PeerJS and independently advance the same cumulative state.
 
-> **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited settlement sketch. The contract cannot prove the claimed terminal state, and its continuation dispute is unsound with delayed pre-signed inputs. Do not use it with real funds.
+> **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited settlement sketch. The contract cannot prove the claimed terminal state, and its continuation dispute is unsound with delayed pre-signed inputs. Do not use it with real funds. Browser settlement transactions are disabled. The deployment script permits only the in-process Hardhat network, and the contract constructor rejects chain IDs other than 31337. These are development restrictions, not a proof of settlement safety; a chain ID alone does not establish that funds are valueless.
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
@@ -13,7 +13,7 @@ This document separates the implementation that exists from designs that do not.
 3. HELLO carries the host-selected matchId, player slot, session address, and uncompressed public key. The receiver checks the expected remote slot and derives the address from the key. The joiner adopts the host match context.
 4. The host starts the match. Each peer samples its own keyboard, signs inputs ahead of simulation, validates remote packets, and advances only when the next P1/P2 pair exists.
 5. Simulation stops when HP reaches zero or the 300-frame timer expires. Either peer can export and replay the packet/canonical-frame transcript.
-6. The settlement panel connects a main wallet and exposes challenge, join, claimResult, and finalizeResult. It does not expose dispute, timeout, or cancellation calls.
+6. The settlement panel connects a main wallet and exposes challenge, join, claimResult, and finalizeResult. All four transaction actions are disabled pending a complete security model. It does not expose dispute, timeout, or cancellation calls.
 
 **Controls (symmetric):** A/D or left/right arrows move, W or up-arrow jumps, and Space, F, J, K, or / attacks. Each peer controls only its assigned fighter.
 
@@ -380,3 +380,13 @@ src/game.ts                      deterministic transition
 src/types.ts                     shared protocol types
 src/verifier.ts                  browser verifier/replayer
 ~~~
+
+
+## Verified takeover audit (2026-09-16)
+
+See [AUDIT.md](AUDIT.md) for the code-verified baseline, checks, and ordered blockers.
+Run `npm test` on Node 20.19+ for input-mask parity and browser settlement containment;
+the test-only loader uses the installed TypeScript compiler. `npm run build` still
+performs full TypeScript checking. `npm run test:contract` includes a negative
+constructor test on a simulated chain ID 1, entirely inside Hardhat with no external RPC.
+No deployment command is part of the verification workflow.

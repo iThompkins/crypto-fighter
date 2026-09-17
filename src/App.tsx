@@ -1172,7 +1172,7 @@ export default function App() {
           <section style={styles.panel}>
             <h2 style={styles.h2}>On-chain settlement</h2>
             <div style={styles.sub}>
-              Main wallet (MetaMask) pays the ante and delegates the session key. Session address:{" "}
+              Settlement is disabled pending execution proofs and authenticated recovery. Do not deposit funds. Session address:{" "}
               {short(wallet?.address ?? "", 18) || "generating..."}
             </div>
             <div style={styles.row}>
@@ -1222,18 +1222,18 @@ export default function App() {
               />
             </div>
             <div style={styles.row}>
-              <button style={styles.button} onClick={() => void onchainChallenge()} disabled={!mainWalletAddress}>
+              <button style={styles.button} onClick={() => void onchainChallenge()} disabled={true}>
                 Challenge (P1)
               </button>
-              <button style={styles.buttonSecondary} onClick={() => void onchainJoin()} disabled={!mainWalletAddress}>
+              <button style={styles.buttonSecondary} onClick={() => void onchainJoin()} disabled={true}>
                 Join (P2)
               </button>
             </div>
             <div style={styles.row}>
-              <button style={styles.button} onClick={() => void onchainClaim()} disabled={!mainWalletAddress || !state.roundOver}>
+              <button style={styles.button} onClick={() => void onchainClaim()} disabled={true}>
                 Claim Result
               </button>
-              <button style={styles.buttonSecondary} onClick={() => void onchainFinalize()} disabled={!mainWalletAddress}>
+              <button style={styles.buttonSecondary} onClick={() => void onchainFinalize()} disabled={true}>
                 Finalize
               </button>
             </div>

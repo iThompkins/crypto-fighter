@@ -430,7 +430,7 @@ async function main() {
   const transcript = JSON.parse(await readFile(file, "utf8"));
   const result = await verifyTranscript(transcript);
   console.log(JSON.stringify(result, null, 2));
-  process.exit(result.ok ? 0 : 1);
+  process.exitCode = result.ok ? 0 : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
