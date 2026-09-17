@@ -117,7 +117,9 @@ export function makeMatchId(): string {
 // Ethereum-style address from an uncompressed secp256k1 public key.
 export function addressFromPublicKey(publicKeyHex: string): string {
   const pub = hexToBytes(strip0x(publicKeyHex));
-  const body = pub.length === 65 ? pub.slice(1) : pub; // drop 0x04 prefix
+  if (pub.length !== 65 || pub[0] !== 4) throw new Error("expected uncompressed public key");
+  secp.Point.fromHex(pub).assertValidity();
+  const body = pub.slice(1);
   return "0x" + bytesToHex(keccak_256(body)).slice(-40);
 }
 

@@ -57,6 +57,7 @@ export default function App() {
   const [finalStateHash, setFinalStateHash] = useState("");
   const [finalFrameHash, setFinalFrameHash] = useState(ZERO32);
   const [transcriptInput, setTranscriptInput] = useState("");
+  const [allowPartialReplay, setAllowPartialReplay] = useState(false);
   const [importedTranscript, setImportedTranscript] = useState<MatchTranscript | null>(null);
   const [replayResult, setReplayResult] = useState<TranscriptVerificationResult | null>(null);
   const [replayFrame, setReplayFrame] = useState(0);
@@ -596,7 +597,7 @@ export default function App() {
     try {
       setLastError("");
       const parsed = JSON.parse(json) as MatchTranscript;
-      const result = await verifyTranscript(parsed);
+      const result = await verifyTranscript(parsed, { allowPartial: allowPartialReplay });
       setImportedTranscript(parsed);
       setReplayResult(result);
       setReplayFrame(0);
@@ -846,9 +847,9 @@ export default function App() {
       },
       packets: uniquePackets,
       canonicalFrames,
-      final: { frame: state.frame, frameHash: finalFrameHash, stateHash: finalStateHash, p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver },
+      final: { frame: state.frame, frameHash: finalFrameHash, stateHash: hashJson(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver },
     };
-  }, [packets, canonicalFrames, localSlot, matchId, wallet?.address, wallet?.publicKey, remoteWalletAddress, remoteWalletPubKey, finalFrameHash, finalStateHash, state]);
+  }, [packets, canonicalFrames, localSlot, matchId, wallet?.address, wallet?.publicKey, remoteWalletAddress, remoteWalletPubKey, finalFrameHash, state]);
 
   const finalSettlementPayload = useMemo(() => {
     if (!state.roundOver || !finalStateHash) return "";
@@ -1051,6 +1052,10 @@ export default function App() {
           <section style={styles.panel}>
             <h2 style={styles.h2}>Transcript replay</h2>
             <div style={styles.sub}>Paste or import a transcript JSON to verify and replay it locally.</div>
+            <label>
+              <input type="checkbox" checked={allowPartialReplay} onChange={(event) => setAllowPartialReplay(event.target.checked)} />
+              Allow partial replay (never payout evidence)
+            </label>
             <div style={styles.row}>
               <input
                 type="file"
@@ -1082,6 +1087,7 @@ export default function App() {
               <>
                 <div style={{ color: replayResult.ok ? "#4ade80" : "#f43f5e", marginTop: 10 }}>
                   Verifier: {replayResult.ok ? "ok" : "failed"} | frame {replayFrame}/{replayResult.states.length - 1}
+                  {replayResult.ok && !replayResult.complete ? " | partial replay only" : ""}
                 </div>
                 <input
                   style={{ width: "100%", marginTop: 8 }}

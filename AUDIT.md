@@ -108,3 +108,28 @@ Browser tests verified a terminal P1 replay against the CLI and an entire live
 Lint now includes JS harnesses; production build retains its bundle-size warning.
 These checks do not cover disconnect/reconnect, malicious handshakes, or prove
 settlement security. Strict transcript completeness/context remains next.
+
+## Strict transcript increment
+
+Browser and CLI now execute one verifier/transition implementation. Strict mode
+requires bounded, contiguous canonical history from genesis through the first
+terminal state, exact declared v1 rules, distinct valid curve-point identities,
+and every final field. All supplied packets, including delayed unused inputs,
+are authenticated. Missing/genesis/interior packets, duplicate/gapped canonical
+frames, malformed fields, changed rules and canonical continuation after a
+terminal state fail. The browser computes the exported state hash on demand,
+so a partially exported replay cannot depend on a pending React hash effect.
+
+Partial replay requires `--allow-partial` or the explicit browser checkbox and
+returns `complete: false`. Every v1 result returns `settlementEligible: false`,
+including a complete terminal result: v1 signatures still omit escrow context.
+Valid future packets do not change terminal frame or terminal packet heads.
+
+The remaining protocol blockers are frozen match/escrow context, signatures
+bound to that context and the complete rules specification, authenticated
+connection lifecycle, execution proofs/disputes, and timeout/recovery. Nothing
+in this increment enables settlement or changes combat/escrow rules.
+
+Validation: full `CHROMIUM_PATH=/usr/bin/chromium npm run check` passed: JS/TS
+lint, 42 Node tests, production build, 27 contract tests, and both real-browser
+tests. The live 300-frame exports pass strict verification in browser and CLI.

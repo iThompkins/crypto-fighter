@@ -178,11 +178,35 @@ Delay creates a protocol gap: a valid future packet may have been signed before 
 
 ### Transcript replay
 
-[verifier.ts](src/verifier.ts) and [verify-match.mjs](tools/verify-match.mjs) first scan every packet mask, then every canonical-frame P1 and P2 mask, including entries outside the walked frame range. Any invalid or missing mask fails with a location-bearing error before packet indexing, hashing, signature verification, or replay. They then derive declared session addresses, require slots, flag duplicate frame/player keys, walk frames 1 through the highest canonical frame, validate packet hashes/chains/signatures and F-inputDelay acknowledgements, rebuild frame hashes, replay transition, and—when the corresponding final fields are present—compare frame/hash/state hash/HP/winner/roundOver.
+[verify-match.mjs](tools/verify-match.mjs) now loads the exact browser
+[verifier.ts](src/verifier.ts) and game transition through the Node 20 TypeScript
+loader. There is no separate CLI rules implementation. The CLI therefore needs
+the repository source and installed TypeScript dependency.
 
-They do not require a complete final object, require a non-empty stateHash, pin declared rules to compiled constants, prove rule negotiation, or give stateHash on-chain meaning. Apart from the whole-array mask preflight, extra structures outside the walked range are not schema validation. An accepted transcript is internally consistent under the checks actually reached; it is not necessarily complete and does not prove payout correctness.
+Strict verification requires bounded arrays, contiguous canonical frames from
+frame 1, a complete final record including its state hash, exact declared v1
+rules, valid distinct curve-point identities, and authenticated packets for every
+executed frame. Every supplied delayed packet is also checked for signature,
+identity, self chain and F-2 acknowledgement. Tail packets are bounded to the
+input-delay horizon and never extend the replay or its terminal packet heads.
+Canonical frames after the first terminal state are rejected. Missing/gapped,
+duplicate, truncated, malformed and nonterminal terminal claims fail closed.
 
-This is a compatibility tightening within transcript version 1: valid masks retain the same packet/frame digests and signatures, while formerly tolerated transcripts containing unknown bits or malformed mask values now fail closed. There is no legacy coercion or permissive mode.
+All packet and canonical input masks are checked before hashing/signature work.
+Unknown bits remain invalid. Packet/frame digest encoding is unchanged.
+
+For diagnostic replay only, explicitly opt into partial mode:
+
+~~~bash
+npm run verify-match -- path/to/prefix.json --allow-partial
+~~~
+
+The browser offers the same opt-in checkbox. An internally valid nonterminal
+prefix can then return `ok: true`, but always `complete: false`. Default strict
+verification requires a terminal history. Every v1 result, including complete
+terminal replay, reports `settlementEligible: false`: signatures still do not bind
+rules/version and escrow context, and the contract does not verify execution.
+This change does not authorize payouts or claim on-chain meaning for stateHash.
 
 ## Main wallets and session keys
 
@@ -377,7 +401,7 @@ used a different protocol and must not be treated as contract validation. Use
 contracts/CryptoFighterArena.sol  native escrow/result/timeout prototype
 hh/test/settlement.cjs            local contract tests
 test/browser/gameplay.spec.mjs   local browser gameplay/replay checks
-tools/verify-match.mjs            standalone transcript verifier/replayer
+tools/verify-match.mjs            CLI adapter for shared transcript verifier
 src/App.tsx                       UI, PeerJS, realtime validation
 src/chain.ts                     injected wallet and minimal Arena ABI
 src/crypto.ts                    keys, signatures, and hashes

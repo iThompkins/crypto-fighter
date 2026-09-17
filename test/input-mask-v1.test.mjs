@@ -16,11 +16,15 @@ import {
 } from "../src/crypto.ts";
 import { decodeInputMask, encodeInputMask, initialState, transition } from "../src/game.ts";
 import { isValidV1InputMask, KNOWN_MASK } from "../src/input-mask.ts";
-import { verifyTranscript as verifyBrowserTranscript } from "../src/verifier.ts";
+import { verifyTranscript as verifyBrowserRaw } from "../src/verifier.ts";
 import {
   isValidV1InputMask as isValidCliInputMask,
-  verifyTranscript as verifyCliTranscript,
+  verifyTranscript as verifyCliRaw,
 } from "../tools/verify-match.mjs";
+
+// These one-frame fixtures test mask semantics in explicitly partial replay mode.
+const verifyBrowserTranscript = (value) => verifyBrowserRaw(value, { allowPartial: true });
+const verifyCliTranscript = (value) => verifyCliRaw(value, { allowPartial: true });
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const fixturePath = join(repoRoot, "test/fixtures/input-mask-v1.json");
@@ -240,7 +244,7 @@ test("CLI process exits 0 for valid and 1 for each invalid mask location", async
     mutate(candidate);
     const transcriptPath = join(tempDir, `${name}.json`);
     await writeFile(transcriptPath, JSON.stringify(candidate));
-    const result = spawnSync(process.execPath, [cliPath, transcriptPath], {
+    const result = spawnSync(process.execPath, [cliPath, transcriptPath, "--allow-partial"], {
       cwd: repoRoot,
       encoding: "utf8",
     });
