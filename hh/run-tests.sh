@@ -4,7 +4,7 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$here/contracts"
-cp -f "$here/../contracts/CryptoFighterArena.sol" "$here/contracts/CryptoFighterArena.sol"
+cp -f "$here/../contracts/"*.sol "$here/contracts/"
 # Keep all harness-owned configuration and cache inside the repository.
 export XDG_CACHE_HOME="$here/../.cache/hardhat/cache"
 export XDG_CONFIG_HOME="$here/../.cache/hardhat/config"

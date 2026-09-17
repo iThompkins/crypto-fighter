@@ -1,9 +1,10 @@
-import { AbiCoder, id, keccak256 } from "ethers";
+import { AbiCoder, getAddress, id, keccak256 } from "ethers";
 import * as game from "./game.ts";
 import { ZERO32 } from "./crypto.ts";
 import { verifyTranscript } from "./verifier.ts";
 import { CANONICAL_RULES_HASH, hashTraceState } from "./protocol.ts";
 export { encodeTraceState, hashTraceState } from "./protocol.ts";
+import { hashGenesisBinding, verifyGenesisAuthorization, type GenesisAuthorization, type GenesisBinding, type GenesisRecord } from "./genesis.ts";
 import type { MatchTranscript } from "./types.ts";
 
 const abi = AbiCoder.defaultAbiCoder();
@@ -35,7 +36,9 @@ function node(left: string, right: string): string {
 }
 export type TraceOpening = { index: number; checkpoint: TraceCheckpoint; siblings: string[] };
 export type ExecutionTrace = {
-  format: "experimental-offchain-trace-v1";
+  format: "experimental-offchain-trace-v1" | "genesis-authorized-trace-v1";
+  genesis?: string;
+  genesisAuthorized?: true;
   settlementEligible: false;
   contextHash: string;
   rulesHash: string;
@@ -46,15 +49,16 @@ export type ExecutionTrace = {
   levels: string[][];
 };
 
-export async function buildExecutionTrace(value: unknown): Promise<ExecutionTrace> {
+async function buildTrace(value: unknown, binding?: GenesisBinding): Promise<ExecutionTrace> {
   // Snapshot before awaiting so mutation during signature verification cannot
   // change the committed inputs after they have been checked.
   const transcript = structuredClone(value) as MatchTranscript;
   const verified = await verifyTranscript(transcript);
   if (!verified.ok || !verified.complete) throw new Error(`complete terminal transcript required: ${verified.errors.join("; ")}`);
-  // Deliberately NOT the future escrow context. V1 has no chain/arena/delegation
-  // signatures, so this experimental domain can never authorize a payout.
-  const contextHash = digest(
+  // Diagnostic roots retain their isolated context. Authorized roots instead
+  // use the independently verified one-time binding; move payloads stay compact.
+  if (binding && (transcript.matchId !== binding.genesis || getAddress(transcript.players.p1.address) !== getAddress(binding.p1Session) || getAddress(transcript.players.p2.address) !== getAddress(binding.p2Session))) throw new Error("transcript does not belong to authorized genesis");
+  const contextHash = binding ? hashGenesisBinding(binding) : digest(
     ["bytes32", "bytes32", "bytes32", "address", "address", "bytes32", "bytes32"],
     [tag("offchain-context"), transcript.matchId, CANONICAL_RULES_HASH,
       transcript.players.p1.address, transcript.players.p2.address,
@@ -89,10 +93,30 @@ export async function buildExecutionTrace(value: unknown): Promise<ExecutionTrac
     levels.push(next);
   }
   return {
-    format: "experimental-offchain-trace-v1", settlementEligible: false,
+    format: binding ? "genesis-authorized-trace-v1" : "experimental-offchain-trace-v1", settlementEligible: false,
+    ...(binding ? { genesis: binding.genesis, genesisAuthorized: true as const } : {}),
     contextHash, rulesHash: CANONICAL_RULES_HASH, root: levels.at(-1)![0],
     terminalFrame: verified.replay.frame, terminalStateHash: terminal.stateHash, checkpoints, levels,
   };
+}
+
+export async function buildExecutionTrace(value: unknown): Promise<ExecutionTrace> {
+  return buildTrace(value);
+}
+
+export async function buildAuthorizedExecutionTrace(value: unknown, authorization: GenesisAuthorization, record: GenesisRecord): Promise<ExecutionTrace> {
+  const auth = structuredClone(authorization), authoritative = structuredClone(record);
+  if (!verifyGenesisAuthorization(auth, authoritative)) throw new Error("genesis not authoritatively authorized");
+  return buildTrace(value, auth.binding);
+}
+
+export async function verifyAuthorizedExecutionTraceCommitment(value: unknown, claim: unknown, authorization: GenesisAuthorization, record: GenesisRecord): Promise<boolean> {
+  try {
+    if (typeof claim !== "object" || claim === null) return false;
+    const candidate = structuredClone(claim) as Record<string, unknown>;
+    const trace = await buildAuthorizedExecutionTrace(value, authorization, record);
+    return (["format", "settlementEligible", "genesis", "genesisAuthorized", "contextHash", "rulesHash", "root", "terminalFrame", "terminalStateHash"] as const).every((field) => candidate[field] === trace[field]);
+  } catch { return false; }
 }
 
 export function openTrace(trace: ExecutionTrace, index: number): TraceOpening {
@@ -127,7 +151,7 @@ export async function verifyExecutionTraceCommitment(transcript: unknown, claim:
     if (typeof claim !== "object" || claim === null) return false;
     const snapshot = structuredClone(claim) as Record<string, unknown>;
     const rebuilt = await buildExecutionTrace(transcript);
-    return (["format", "settlementEligible", "contextHash", "rulesHash", "root", "terminalFrame", "terminalStateHash"] as const)
+    return (["format", "settlementEligible", "genesis", "genesisAuthorized", "contextHash", "rulesHash", "root", "terminalFrame", "terminalStateHash"] as const)
       .every((field) => snapshot[field] === rebuilt[field]);
   } catch { return false; }
 }

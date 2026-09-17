@@ -191,3 +191,44 @@ authorization and these changes do not enable settlement.
 Validation: lint/build passed, all 51 Node tests passed, all 28 contract tests
 passed, and both browser tests passed. The canonical-rules rejection test checks
 decoded revert data because viaIR source mapping omitted Hardhat's reason text.
+
+## Authoritative genesis and authorized trace increment — 2026-09-17
+
+The arena now permanently reserves each genesis, snapshots the completed binding
+at join, and verifies one-time authorizations from both distinct delegated session
+keys. The binding includes chain, arena, challenge, canonical version, wallets,
+session keys and original escrow terms. Move digests remain byte-identical and
+carry only genesis plus move-chain fields. Authorization is required before the
+legacy result/timeout entry points. Unactivated joined matches refund each deposit
+once after a contract-recorded deadline; activation includes the deadline, refunds
+require strictly later time. Binding/registration survive cancellation and payout.
+
+`src/genesis.ts` reads a pinned chain/arena/challenge record at one block, checks
+registration and both session signatures, and provides a session signer locked
+to one binding/expected main wallet. It blocks pre-activation and conflicting
+move signatures. Browser and contract signature recovery now agree on low-S and
+v=27/28. A supplied authorization cannot be its own authoritative chain record.
+
+Authorized trace APIs rebuild the terminal history under the registered binding
+hash, check genesis/session identity, and use a separate authorized format.
+Diagnostic roots cannot be relabeled as authorized. Every output remains
+`settlementEligible: false`. The browser's funded lifecycle is not yet wired to
+these APIs; existing live-browser games remain practice games.
+
+`src/bisection.ts` authenticates fixed-root endpoint/midpoint openings and isolates
+adjacent checkpoint indices in at most nine rounds. It is an off-chain coordinator,
+not a live transaction/deadline/payout state machine. Solidity's new pure
+`TraceCommitmentVerifier` verifies exactly the same compact checkpoint branches;
+no full transcript is received/replayed on-chain. An integration test builds from
+an actual activated Hardhat record and verifies those openings in Solidity.
+
+Validated: full lint/build, 57 Node tests, 35 contract tests and two browser tests
+passed. Tests cover duplicate genesis, cross-contract replay, altered bindings,
+signature malleability, exact activation/refund deadlines, repeat refunds, registry
+immutability, unauthorized roots and malformed/replayed bisection openings.
+See `docs/GENESIS_AUTHORIZATION.md` for encoding, trust roots and current limits.
+Nonce reservation preemption can require retry; push-refund recipients can refuse
+transfers. Neither problem is claimed solved. On-chain claims/bisection turns,
+minimal transition adjudication, dispute deadlines and complete recovery remain
+next. The legacy optimistic/continuation payout code remains an unsafe local-only
+sketch; real-money/browser settlement stays disabled.

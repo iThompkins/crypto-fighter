@@ -32,11 +32,12 @@ a UUID-like genesis nonce. Every move digest includes that ID, so identical
 moves in different matches have distinct chains. Initial zero hashes are only
 previous-link sentinels. The fixed ID in the transcript generator is test-only.
 
-The intended next step is authenticating that genesis once against the unique,
-immutable escrow record and canonical version. Later move signatures can rely on
-that binding without repeating all escrow fields. Unique registration and secure
-cross-chain/contract genesis adoption are not implemented yet; randomness alone
-does not establish that authorization.
+The arena now permanently registers that genesis and requires both delegated
+session keys to authorize the completed immutable escrow binding once. Later
+move signatures rely on that binding without repeating its fields. See
+[genesis authorization](docs/GENESIS_AUTHORIZATION.md) for the protocol and tested
+limits. The browser still runs practice games; funded lifecycle integration and
+production dispute settlement remain disabled.
 
 ## Deterministic cumulative GameState
 
@@ -242,11 +243,15 @@ Only the chain's native token is accepted through payable calls. **ERC-20 and st
 
 challenge requires non-zero native stake, matchId, P1 session address, the sole canonical rulesHash, and at least a 24-hour response window. rulesHash identifies the canonical game version; it does not configure gameplay. It stores an open challenge and context hash over chain ID, contract, challenge ID, P1 main wallet, stake, match ID, rules hash, P1 session key, and window. Optional expectedOpponent is stored/emitted but omitted from the initial context-hash calculation.
 
-join requires Open status, a caller other than P1, exactly equal stake, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key, makes the match Active, and extends matchContextHash with P2 main/session addresses.
+join requires Open status, a caller other than P1, exactly equal stake, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key (requiring distinct keys), makes the escrow Active but
+not yet authorized for play, and freezes the full GenesisBinding. Its hash replaces
+the provisional matchContextHash. Both session authorizations must activate the
+genesis before result or timeout actions. Unactivated matches refund both deposits
+after the authorization deadline; their genesis reservations remain permanent.
 
 ### Claim, dispute, and finalize
 
-claimResult requires an Active match, participant caller, no existing result claim, no active timeout, outcome P1/P2/Tie, and non-zero finalHead. It otherwise stores claimant-supplied outcome, final frame, frame head, and packet heads and starts the deadline.
+claimResult requires an Active, genesis-authorized match, participant caller, no existing result claim, no active timeout, outcome P1/P2/Tie, and non-zero finalHead. It otherwise stores claimant-supplied outcome, final frame, frame head, and packet heads and starts the deadline.
 
 disputeResult is limited to the other participant while block.timestamp <= the deadline. It requires two packets at claimedFinalFrame + 1, slots 1/2, stored match ID, v1 input masks with no bits above `0x0f`, prevSelfHash links to claimed packet heads, and signatures recovering to stored session keys. It does **not** check prevOppHash, canonical-frame chain, state, terminality, or claimed outcome. Success awards the pot to the disputer and records counters.
 
@@ -256,7 +261,7 @@ finalizeResult is permissionless only while block.timestamp > the deadline and p
 
 ### Timeout and cancellation
 
-claimTimeout lets either participant accuse the other while Active and no timeout is active. It requires frame > 0 and non-zero transcriptHead/packetHash, stores them, and starts a deadline.
+claimTimeout lets either participant accuse the other while Active, genesis-authorized, and no timeout is active. It requires frame > 0 and non-zero transcriptHead/packetHash, stores them, and starts a deadline.
 
 respondTimeout requires the accused before deadline, a non-regressing frame, and non-zero replacement hashes, then clears the timeout. **No signatures or relationship among these hashes are verified.** After deadline anyone may call forfeitTimeout, awarding the pot to the timeout claimant. This is scaffolding, and the UI exposes none of it.
 
@@ -276,7 +281,7 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 | Canonical chain/full transcript | Not checked |
 | Transition, HP, timer, terminality, winner | Not implemented on-chain |
 | Timeout hashes | Non-zero only; relationship/signatures trusted |
-| matchContextHash in packet signatures | Not implemented; packets sign matchId only |
+| Genesis-to-escrow authority | Both session keys sign the frozen binding once; moves retain genesis-only context |
 
 ## Merkle trace and interactive bisection direction
 
@@ -308,9 +313,11 @@ opening for the selected checkpoint. These are **not escrow-authorized roots**:
 v1 packets do not sign the required domain and every output is marked
 `settlementEligible: false`.
 
-Not implemented: escrow-bound signatures/context, on-chain root claims, interactive
-bisection, one-step adjudication, authenticated dispute timeouts, or availability
-recovery. The existing continuation-packet dispute conflicts with this design and
+Now implemented in addition: immutable escrow-bound genesis authorization,
+authorized trace roots, an off-chain authenticated bisection coordinator, and
+compact Solidity Merkle membership verification. Not implemented: on-chain root
+claims, on-chain interactive bisection, one-step adjudication, authenticated
+dispute-turn timeouts, or availability recovery. The existing continuation-packet dispute conflicts with this design and
 must eventually be replaced. No full-transcript on-chain replay fallback is planned.
 
 ## Safety limitations
@@ -320,11 +327,12 @@ must eventually be replaced. No full-transcript on-chain replay fallback is plan
 - Pre-signed delayed inputs can falsely satisfy continuation after round end.
 - Unauthenticated timeout hashes can produce unjustified forfeits.
 - The canonical rules fingerprint is enforced, but outcome/trace claim fields remain trusted; Solidity has no game verifier.
-- Packet signatures omit chain, contract, challenge, matchContextHash, and rulesHash domain; reused match IDs create ambiguity.
-- Solidity does not explicitly enforce low-S or validate v before ecrecover.
+- Moves intentionally sign only genesis context; authorized use requires the one-time
+  registered binding. The practice UI does not yet integrate this lifecycle.
+- Solidity and browser signature recovery enforce low-S and v=27/28.
 - PeerJS/browser memory are not hardened custody, privacy, availability, or DoS systems; reset/reload loses keys.
 - Input delay permits limited lookahead; commit-reveal is only proposed.
-- Both players may delegate the same session address.
+- Session delegation now requires distinct session addresses.
 - Reputation counters are event counts, not proof of honesty or skill.
 - UI covers only part of lifecycle and does not monitor deadlines.
 - ERC-20/stablecoins, fees, upgrades, emergency recovery, and production operations are absent.

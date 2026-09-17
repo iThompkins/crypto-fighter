@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { auth, record } from "../fixtures/genesis.mjs";
 
 async function developerMode(page) {
   await page.getByRole("button", { name: "Regular mode", exact: true }).click();
@@ -51,6 +52,16 @@ test("generated terminal replay agrees in browser and CLI; settlement stays disa
   expect(traceBrowser.root).toBe(traceCli.root);
   expect(traceBrowser.contextHash).toBe(traceCli.contextHash);
   expect(traceBrowser.opening).toEqual(traceCli.opening);
+  // Fixture authority here exercises browser crypto; hh/test/genesis.cjs
+  // separately verifies the record against an actual activated EVM challenge.
+  const authorizedBrowser = await page.evaluate(async ({ value, authorization, authoritative }) => {
+    const { buildAuthorizedExecutionTrace } = await import("/src/execution-trace.ts");
+    return buildAuthorizedExecutionTrace(value, authorization, authoritative);
+  }, { value: transcript, authorization: auth, authoritative: record });
+  expect(authorizedBrowser.genesisAuthorized).toBe(true);
+  expect(authorizedBrowser.genesis).toBe(transcript.matchId);
+  expect(authorizedBrowser.settlementEligible).toBe(false);
+  expect(authorizedBrowser.root).not.toBe(traceCli.root);
   transcript.packets[0].inputMask = 16;
   expect((await browserVerify(page, transcript)).ok).toBe(false);
   expect(errors).toEqual([]);

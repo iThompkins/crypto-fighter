@@ -65,6 +65,67 @@ contract CryptoFighterArena {
         bytes32 timeoutPacketHash;
     }
 
+    // Immutable even after stake is paid/refunded. All move packets still sign
+    // only their genesis and move-chain fields; authorization happens once here.
+    struct GenesisBinding {
+        uint256 chainId;
+        address arena;
+        uint256 challengeId;
+        bytes32 genesis;
+        bytes32 rulesHash;
+        address p1;
+        address p2;
+        address p1Session;
+        address p2Session;
+        uint256 stake;
+        uint256 responseWindow;
+        address restrictedOpponent;
+    }
+
+    bytes32 public constant GENESIS_BINDING_TAG = keccak256("CryptoFighter.GenesisBinding.v1");
+    bytes32 public constant GENESIS_AUTHORIZATION_TAG = keccak256("CryptoFighter.GenesisAuthorization.v1");
+    mapping(bytes32 => uint256) public challengeForGenesis;
+    mapping(uint256 => GenesisBinding) private genesisBindings;
+    mapping(uint256 => bool) public genesisAuthorized;
+    mapping(uint256 => uint64) public genesisAuthorizationDeadline;
+
+    event GenesisAuthorized(uint256 indexed challengeId, bytes32 indexed genesis, bytes32 bindingHash);
+    event UnactivatedMatchRefunded(uint256 indexed challengeId);
+
+    function getGenesisBinding(uint256 challengeId) external view returns (GenesisBinding memory binding, bool authorized) {
+        return (genesisBindings[challengeId], genesisAuthorized[challengeId]);
+    }
+
+    function genesisAuthorizationDigest(uint256 challengeId, uint256 slot) public view returns (bytes32) {
+        require(slot == 1 || slot == 2, "wrong slot");
+        require(genesisBindings[challengeId].p2 != address(0), "not joined");
+        return keccak256(abi.encode(GENESIS_AUTHORIZATION_TAG, challenges[challengeId].matchContextHash, slot));
+    }
+
+    function authorizeGenesis(uint256 challengeId, bytes calldata p1Signature, bytes calldata p2Signature) external {
+        Challenge storage c = challenges[challengeId];
+        require(c.status == MatchStatus.Active, "not active");
+        require(!genesisAuthorized[challengeId], "genesis already authorized");
+        require(block.timestamp <= genesisAuthorizationDeadline[challengeId], "authorization expired");
+        require(_recover(genesisAuthorizationDigest(challengeId, 1), p1Signature) == c.p1SessionKey, "bad P1 authorization");
+        require(_recover(genesisAuthorizationDigest(challengeId, 2), p2Signature) == c.p2SessionKey, "bad P2 authorization");
+        genesisAuthorized[challengeId] = true;
+        emit GenesisAuthorized(challengeId, c.matchId, c.matchContextHash);
+    }
+
+    function refundUnactivatedMatch(uint256 challengeId) external nonReentrant {
+        Challenge storage c = challenges[challengeId];
+        require(c.status == MatchStatus.Active, "not active");
+        require(!genesisAuthorized[challengeId], "genesis already authorized");
+        require(block.timestamp > genesisAuthorizationDeadline[challengeId], "authorization window open");
+        uint256 refund = c.stake;
+        c.stake = 0;
+        c.status = MatchStatus.Cancelled;
+        emit UnactivatedMatchRefunded(challengeId);
+        _safeTransfer(c.p1, refund);
+        _safeTransfer(c.p2, refund);
+    }
+
     /// @notice A per-frame input packet signed by a player's session key.
     /// @dev Digest matches the client/verifier exactly:
     ///      keccak256(abi.encode(matchId, frame, player, inputMask, prevSelfHash, prevOppHash)).
@@ -202,6 +263,7 @@ contract CryptoFighterArena {
     ) external payable returns (uint256 challengeId) {
         require(msg.value > 0, "stake required");
         require(matchId != bytes32(0), "matchId required");
+        require(challengeForGenesis[matchId] == 0, "genesis already registered");
         require(rulesHash == CANONICAL_RULES_HASH, "unsupported canonical rules");
         require(p1SessionKey != address(0), "session key required");
         require(
@@ -210,6 +272,7 @@ contract CryptoFighterArena {
         );
 
         challengeId = nextChallengeId++;
+        challengeForGenesis[matchId] = challengeId;
         // A result claim is always challengeable for at least 24 hours. Until
         // the execution-proof protocol is complete, shortening this window
         // would let an unverified claim finalize before an opponent can react.
@@ -265,6 +328,7 @@ contract CryptoFighterArena {
         require(msg.sender != c.p1, "cannot join self");
         require(msg.value == c.stake, "stake mismatch");
         require(p2SessionKey != address(0), "session key required");
+        require(p2SessionKey != c.p1SessionKey, "distinct session keys required");
         require(
             c.restrictedOpponent == address(0) || c.restrictedOpponent == msg.sender,
             "opponent locked"
@@ -274,9 +338,14 @@ contract CryptoFighterArena {
         c.joinedAt = uint64(block.timestamp);
         c.p2SessionKey = p2SessionKey;
         c.status = MatchStatus.Active;
-        c.matchContextHash = keccak256(
-            abi.encode(c.matchContextHash, msg.sender, p2SessionKey)
+        GenesisBinding memory binding = GenesisBinding(
+            block.chainid, address(this), challengeId, c.matchId, c.rulesHash,
+            c.p1, c.p2, c.p1SessionKey, c.p2SessionKey, c.stake,
+            c.responseWindowSeconds, c.restrictedOpponent
         );
+        genesisBindings[challengeId] = binding;
+        c.matchContextHash = keccak256(abi.encode(GENESIS_BINDING_TAG, binding));
+        genesisAuthorizationDeadline[challengeId] = uint64(block.timestamp) + c.responseWindowSeconds;
 
         PlayerStats storage p1Stats = playerStats[c.p1];
         PlayerStats storage p2Stats = playerStats[msg.sender];
@@ -306,6 +375,7 @@ contract CryptoFighterArena {
     ) external onlyParticipant(challengeId) {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
+        require(genesisAuthorized[challengeId], "genesis not authorized");
         require(c.resultClaimant == address(0), "claim already active");
         require(c.timeoutDeadline == 0, "timeout active");
         require(
@@ -332,6 +402,7 @@ contract CryptoFighterArena {
     function finalizeResult(uint256 challengeId) external nonReentrant {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
+        require(genesisAuthorized[challengeId], "genesis not authorized");
         require(c.resultClaimant != address(0), "no claim");
         require(block.timestamp > c.resultDeadline, "window open");
 
@@ -349,6 +420,7 @@ contract CryptoFighterArena {
     ) external nonReentrant onlyParticipant(challengeId) {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
+        require(genesisAuthorized[challengeId], "genesis not authorized");
         require(c.resultClaimant != address(0), "no claim");
         require(block.timestamp <= c.resultDeadline, "window closed");
         require(msg.sender != c.resultClaimant, "claimant cannot dispute");
@@ -404,6 +476,8 @@ contract CryptoFighterArena {
             s := mload(add(sig, 64))
             v := byte(0, mload(add(sig, 96)))
         }
+        require(v == 27 || v == 28, "bad recovery id");
+        require(uint256(s) > 0 && uint256(s) <= 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0, "noncanonical signature");
         return ecrecover(digest, v, r, s);
     }
 
@@ -418,6 +492,7 @@ contract CryptoFighterArena {
     ) external onlyParticipant(challengeId) {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
+        require(genesisAuthorized[challengeId], "genesis not authorized");
         require(c.timeoutDeadline == 0, "timeout already active");
         require(frame > 0, "frame required");
         require(transcriptHead != bytes32(0), "transcript head required");
@@ -459,6 +534,7 @@ contract CryptoFighterArena {
     ) external onlyParticipant(challengeId) {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
+        require(genesisAuthorized[challengeId], "genesis not authorized");
         require(c.timeoutDeadline != 0, "no active timeout");
         require(msg.sender == c.timeoutAccused, "only accused");
         require(block.timestamp <= c.timeoutDeadline, "deadline passed");
@@ -483,6 +559,7 @@ contract CryptoFighterArena {
     function forfeitTimeout(uint256 challengeId) external nonReentrant {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
+        require(genesisAuthorized[challengeId], "genesis not authorized");
         require(c.timeoutDeadline != 0, "no active timeout");
         require(block.timestamp > c.timeoutDeadline, "deadline not passed");
 

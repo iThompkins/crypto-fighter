@@ -61,6 +61,10 @@ async function openMatch(arena, p1, p2, stake, windowSec = 24 * 3600) {
   await tx.wait();
   const challengeId = 1n;
   await (await arena.connect(p2).join(challengeId, p2Session.address, { value: stake })).wait();
+  await (await arena.authorizeGenesis(challengeId,
+    p1Session.signingKey.sign(await arena.genesisAuthorizationDigest(challengeId, 1)).serialized,
+    p2Session.signingKey.sign(await arena.genesisAuthorizationDigest(challengeId, 2)).serialized
+  )).wait();
   return { matchId, challengeId, p1Session, p2Session };
 }
 

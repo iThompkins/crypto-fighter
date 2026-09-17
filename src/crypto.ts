@@ -148,8 +148,11 @@ export async function signDigest(privateKeyHex: string, digestHex: string): Prom
 export function recoverSigner(digestHex: string, signatureHex: string): string {
   const sig = hexToBytes(strip0x(signatureHex));
   if (sig.length !== 65) throw new Error("expected 65-byte signature");
+  if (sig[64] !== 27 && sig[64] !== 28) throw new Error("bad recovery id");
+  const compact = secp.Signature.fromCompact(sig.slice(0, 64));
+  if (compact.hasHighS()) throw new Error("noncanonical signature");
   const recovery = sig[64] - 27;
-  const recovered = secp.Signature.fromCompact(sig.slice(0, 64))
+  const recovered = compact
     .addRecoveryBit(recovery)
     .recoverPublicKey(hexToBytes(strip0x(digestHex)))
     .toRawBytes(false);

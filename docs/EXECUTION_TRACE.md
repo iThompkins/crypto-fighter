@@ -14,6 +14,17 @@ the necessary data challenges in time. A Merkle root alone does not prove
 execution or data availability. Monitoring, availability, response windows and
 recovery are security requirements, not optional UI conveniences.
 
+## Current implementation status
+
+Genesis registration, one-time session authorization, immutable escrow binding,
+context-authorized trace construction, an off-chain authenticated bisection
+coordinator, and compact Solidity Merkle membership verification are now
+implemented. See [GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md) for exact
+formats, chain authority, lifecycle and tested limits. Live on-chain trace claims,
+bisection turns/deadlines and minimal transition adjudication are still pending.
+The sections below preserve the original design and experimental encoding; they
+must not be read as claiming a complete settlement protocol.
+
 ## Repository inspection and reuse
 
 At `7472d04`, the README already proposed canonical state encoding, authenticated
@@ -51,7 +62,7 @@ This domain is deliberately distinct from the future escrow-bound protocol.
 Its context hash commits match ID, full numeric rules/genesis hash with semantic revision,
 both session addresses and public-key hashes. V1 packets do not sign this context.
 It cannot be upgraded to an escrow authorization by attaching a chain ID later.
-The future protocol should authenticate a fresh random UUID-like genesis ID
+The protocol authenticates a fresh random UUID-like genesis ID
 against its immutable escrow record once, before play. That binding identifies
 chain, arena, challenge, main-wallet participants, delegated session keys,
 canonical protocol version and escrow terms. Authenticated genesis/session
@@ -65,8 +76,9 @@ Current live `makeMatchId()` generates a fresh random 256-bit bytes32 ID, which
 serves the intended UUID-like role. First and later move digests include this ID;
 zero previous hashes are sentinels, not a shared match identity. The deterministic
 sample generator deliberately uses a fixed fixture ID and is not matchmaking.
-The current escrow does not yet enforce unique genesis registration or
-cross-domain authenticated adoption. That remains a prerequisite to settlement.
+The arena now enforces unique registration and both session authorizations over
+the immutable cross-domain binding. Funded browser lifecycle integration remains
+pending; practice games do not implicitly gain escrow authority.
 
 ## One canonical game version
 
@@ -133,7 +145,7 @@ A membership proof proves inclusion only, not correctness of the state or root.
 The root, context, final frame and terminal state must be checked against locally
 rebuilt output when importing a claim.
 
-## Required settlement/dispute state machine (not implemented)
+## Required settlement/dispute state machine (partially implemented)
 
 1. Authenticate the unique genesis-to-escrow binding and session delegations before signing inputs. Claims
    bind root, format/rules/context, terminal frame, encoded terminal state and
@@ -176,8 +188,9 @@ rebuilt output when importing a claim.
 
 ## Next implementation boundary
 
-Freeze the escrow-bound protocol and canonical input/authentication rules first.
-Then introduce claim/dispute storage, authenticated midpoint rounds, a minimal
+The genesis binding and compact move authentication are implemented as described
+in GENESIS_AUTHORIZATION.md. Next introduce claim/dispute storage, on-chain
+authenticated midpoint rounds, a minimal
 Solidity transition verifier with differential tests against the unchanged game,
 and authenticated turn timeouts. This document is not a claim those components
 exist. No full-transcript on-chain replay fallback is permitted.

@@ -7,7 +7,7 @@ import { CANONICAL_V1_RULES as V1_RULES } from "./protocol.ts";
 export type TranscriptVerificationResult = {
   ok: boolean;
   complete: boolean;
-  // V1 packets lack escrow domain binding. Even complete replay is not payout authorization.
+  // A bare transcript supplies no authoritative genesis record or payout authorization.
   settlementEligible: false;
   errors: string[];
   states: GameState[];
