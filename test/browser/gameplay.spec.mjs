@@ -40,6 +40,17 @@ test("generated terminal replay agrees in browser and CLI; settlement stays disa
   expect(browser.replay).toEqual(cli.replay);
   expect(browser.replay.winner).toBe("P1");
   expect(browser.replay.roundOver).toBe(true);
+  const traceCli = JSON.parse(execFileSync(process.execPath, ["tools/commit-trace.mjs", file, "90"], { encoding: "utf8" }));
+  const traceBrowser = await page.evaluate(async (value) => {
+    const { buildExecutionTrace, openTrace, verifyTraceOpening } = await import("/src/execution-trace.ts");
+    const trace = await buildExecutionTrace(value);
+    const opening = openTrace(trace, 90);
+    return { root: trace.root, contextHash: trace.contextHash, opening, valid: verifyTraceOpening(trace.root, trace.contextHash, opening) };
+  }, transcript);
+  expect(traceBrowser.valid).toBe(true);
+  expect(traceBrowser.root).toBe(traceCli.root);
+  expect(traceBrowser.contextHash).toBe(traceCli.contextHash);
+  expect(traceBrowser.opening).toEqual(traceCli.opening);
   transcript.packets[0].inputMask = 16;
   expect((await browserVerify(page, transcript)).ok).toBe(false);
   expect(errors).toEqual([]);

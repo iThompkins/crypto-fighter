@@ -133,3 +133,33 @@ in this increment enables settlement or changes combat/escrow rules.
 Validation: full `CHROMIUM_PATH=/usr/bin/chromium npm run check` passed: JS/TS
 lint, 42 Node tests, production build, 27 contract tests, and both real-browser
 tests. The live 300-frame exports pass strict verification in browser and CLI.
+
+## Merkle/bisection architectural constraint and trace primitives
+
+The user pinned the intended design to optimistic Merkle trace claims,
+interactive bisection, and minimal one-step adjudication. Complete transcripts
+stay off-chain; Solidity must never receive/replay the full match. Inspection of
+tracked source and available history found the README's existing proposal but
+no implementation. The current continuation-packet dispute materially conflicts
+and will require replacement; the off-chain transition and strict verifier fit.
+
+`docs/EXECUTION_TRACE.md` preserves the proposal and records the encoding,
+checkpoint/adjacent-transition relationship, bisection invariants, availability
+and non-response requirements, optimistic-security assumptions and unresolved
+protocol boundaries. It explicitly distinguishes isolating an inconsistent
+transition from proving a globally earliest mismatch in arbitrary reconverging
+fraudulent traces. The settlement contract is unchanged in this increment.
+
+Implemented: experimental off-chain canonical ABI state encoding (exact half-unit
+geometry), rules/genesis commitment, ordered domain-separated Merkle tree,
+checkpoint openings, and independently rebuilt commitment verification. CLI
+generation/verification and browser parity are covered. Terminal checkpoints
+normalize to a fixed comparison horizon; unused delayed inputs cannot change
+the root. These commitments are expressly not escrow-authorized: v1 signatures
+still lack chain/contract/challenge/participant/rules/escrow domain binding.
+
+Validation: combined check passed with 48 Node tests, 27 contract tests, both
+browser tests, lint and build. An additional received-commitment regression and
+CLI check brings the Node suite to 49 tests. Bisection transactions, minimal
+Solidity transition adjudication and authenticated dispute timeouts remain
+unimplemented. Real-money activity remains disabled.

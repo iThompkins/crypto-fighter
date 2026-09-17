@@ -259,21 +259,40 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 | Timeout hashes | Non-zero only; relationship/signatures trusted |
 | matchContextHash in packet signatures | Not implemented; packets sign matchId only |
 
-## Merkle/bisection proposal — nowhere implemented
+## Merkle trace and interactive bisection direction
 
-**Merkle state roots, interactive bisection, and one-step fraud proofs are design only and are nowhere implemented in React, verifier, tools, or Solidity.** Current frameHash is a linear input hash chain and stateHash is one off-chain JSON hash; neither is a Merkle root.
+The intended settlement architecture uses **optimistic Merkle-committed execution,
+interactive bisection, and minimal on-chain transition verification**. Solidity
+must not receive or replay the complete match transcript. An undisputed claim
+can finalize after its challenge window; a dispute must authenticate midpoint
+openings until it isolates a transition to check.
 
-A proposed architecture could:
+The prior README proposal is preserved and developed in
+[docs/EXECUTION_TRACE.md](docs/EXECUTION_TRACE.md), including the inspection findings,
+encoding, dispute invariants, availability requirements, and remaining work.
 
-1. Specify canonical cross-language encodings for rules and every state.
-2. Commit each transition leaf to frame, pre-state hash, two authenticated packet hashes, frame hash, and post-state hash.
-3. Merklize ordered leaves; claims submit trace root/length/terminal state/outcome, with a new mechanism acknowledging actual execution because packet signatures alone are insufficient.
-4. For incompatible claims, run deadline-bound on-chain binary search over authenticated midpoints to isolate the first disagreement.
-5. Supply pre-state, inputs, execution evidence, claimed post-state, and Merkle branches for one disputed step.
-6. Execute one specified transition in Solidity or a verification VM and reject/slash the inconsistent claim.
-7. Specify data availability, abandonment, non-response, and maximum traces so branch withholding cannot win.
+Implemented now: experimental off-chain trace construction from a strictly
+verified terminal transcript, canonical ABI state encoding, ordered Merkle trees,
+and bounded checkpoint membership proofs. Half-unit collision coordinates are
+preserved exactly. Authenticated but unexecuted delayed inputs cannot alter the
+root. Browser and CLI use the same implementation.
 
-This requires new formats, serialization, contract state machines, transition verification, tests, and audits. It must not be described as current capability.
+~~~bash
+npm run make-transcript -- /tmp/terminal.json
+node tools/commit-trace.mjs /tmp/terminal.json 90 > /tmp/commitment.json
+npm run verify-trace -- /tmp/terminal.json /tmp/commitment.json
+~~~
+
+The output includes the root, experimental off-chain context, complete numeric
+rules/genesis hash with semantic revision, terminal metadata, and a nine-sibling
+opening for the selected checkpoint. These are **not escrow-authorized roots**:
+v1 packets do not sign the required domain and every output is marked
+`settlementEligible: false`.
+
+Not implemented: escrow-bound signatures/context, on-chain root claims, interactive
+bisection, one-step adjudication, authenticated dispute timeouts, or availability
+recovery. The existing continuation-packet dispute conflicts with this design and
+must eventually be replaced. No full-transcript on-chain replay fallback is planned.
 
 ## Safety limitations
 
@@ -317,7 +336,7 @@ This requires new formats, serialization, contract state machines, transition ve
 
 ## Requirements
 
-- Node.js 24+
+- Node.js 20.19+
 - npm
 
 ## Run locally

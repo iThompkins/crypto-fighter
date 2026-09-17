@@ -15,7 +15,9 @@
     "simulate-arena": "node tools/simulate-arena.mjs",
     "make-transcript": "node tools/make-transcript.mjs",
     "test:browser": "playwright test",
-    "check": "npm run lint && npm test && npm run build && npm run test:contract && npm run test:browser"
+    "check": "npm run lint && npm test && npm run build && npm run test:contract && npm run test:browser",
+    "commit-trace": "node tools/commit-trace.mjs",
+    "verify-trace": "node tools/verify-trace.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
