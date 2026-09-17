@@ -2,7 +2,9 @@ import { AbiCoder, id, keccak256 } from "ethers";
 import * as game from "./game.ts";
 import { ZERO32 } from "./crypto.ts";
 import { verifyTranscript } from "./verifier.ts";
-import type { Fighter, GameState, MatchTranscript } from "./types.ts";
+import { CANONICAL_RULES_HASH, hashTraceState } from "./protocol.ts";
+export { encodeTraceState, hashTraceState } from "./protocol.ts";
+import type { MatchTranscript } from "./types.ts";
 
 const abi = AbiCoder.defaultAbiCoder();
 const digest = (types: string[], values: unknown[]) => keccak256(abi.encode(types, values));
@@ -10,38 +12,6 @@ const tag = (name: string) => id(`CryptoFighter:experimental-offchain-trace-v1:$
 export const TRACE_DEPTH = 9;
 export const TRACE_LAST_INDEX = game.ROUND_FRAMES;
 const hash32 = (value: unknown): value is string => typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
-
-// Explicit semantic revision plus every current numeric rule. Changing transition
-// order/semantics requires a new revision even if its numeric constants stay equal.
-export const TRACE_RULES_HASH = digest(
-  ["bytes32", "uint256[23]", "bytes32"],
-  [tag("rules-cumulative-jump-solid-body-multihit-last-move-facing-v1"), [
-    game.WIDTH, game.HEIGHT, game.FLOOR_Y, game.FPS, game.ROUND_FRAMES, game.INPUT_DELAY,
-    game.FIGHTER_W, game.FIGHTER_H, game.MOVE_SPEED, game.ATTACK_ACTIVE_FRAMES,
-    game.ATTACK_COOLDOWN_FRAMES, game.ATTACK_W, game.ATTACK_H, game.ATTACK_REACH,
-    game.DAMAGE, game.MAX_HP, game.JUMP_VELOCITY, game.GRAVITY,
-    game.INPUT.LEFT, game.INPUT.RIGHT, game.INPUT.ATTACK, game.INPUT.UP, 2,
-  ], keccak256(encodeTraceState(game.initialState()))],
-);
-
-function integer(value: number): number {
-  if (!Number.isSafeInteger(value)) throw new Error("state requires exact safe integers in scaled encoding");
-  return value;
-}
-function fighterWords(f: Fighter): number[] {
-  // Signed, doubled geometric values preserve half-unit collision coordinates.
-  return [f.x * 2, f.y * 2, f.w * 2, f.h * 2, f.hp, f.facing, f.attackCooldown, f.attackActive, f.vy * 2].map(integer);
-}
-export function encodeTraceState(state: GameState): string {
-  const outcome = { P1: 1, P2: 2, TIE_BOTH_LOSE: 3 };
-  if (typeof state.roundOver !== "boolean" || (state.winner !== null && !(state.winner in outcome))) throw new Error("invalid state outcome");
-  return abi.encode(
-    ["bytes32", "uint256", "uint256", "bool", "uint8", "int256[9]", "int256[9]"],
-    [tag("state"), integer(state.frame), integer(state.timerFramesLeft), state.roundOver,
-      state.winner === null ? 0 : outcome[state.winner], fighterWords(state.p1), fighterWords(state.p2)],
-  );
-}
-export const hashTraceState = (state: GameState) => keccak256(encodeTraceState(state));
 
 export type TraceCheckpoint = {
   stateHash: string;
@@ -86,7 +56,7 @@ export async function buildExecutionTrace(value: unknown): Promise<ExecutionTrac
   // signatures, so this experimental domain can never authorize a payout.
   const contextHash = digest(
     ["bytes32", "bytes32", "bytes32", "address", "address", "bytes32", "bytes32"],
-    [tag("offchain-context"), transcript.matchId, TRACE_RULES_HASH,
+    [tag("offchain-context"), transcript.matchId, CANONICAL_RULES_HASH,
       transcript.players.p1.address, transcript.players.p2.address,
       keccak256(transcript.players.p1.publicKey), keccak256(transcript.players.p2.publicKey)],
   );
@@ -120,7 +90,7 @@ export async function buildExecutionTrace(value: unknown): Promise<ExecutionTrac
   }
   return {
     format: "experimental-offchain-trace-v1", settlementEligible: false,
-    contextHash, rulesHash: TRACE_RULES_HASH, root: levels.at(-1)![0],
+    contextHash, rulesHash: CANONICAL_RULES_HASH, root: levels.at(-1)![0],
     terminalFrame: verified.replay.frame, terminalStateHash: terminal.stateHash, checkpoints, levels,
   };
 }

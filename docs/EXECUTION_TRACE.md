@@ -34,7 +34,7 @@ this primitive increment, and browser settlement remains disabled.
 The prior proposal's execution-acknowledgement mechanism was unresolved. It is
 not silently treated as implemented or as a mandatory opponent co-signature
 on the result. A legitimate winner must be able to claim without that signature.
-Canonical input selection, conflicting signed packets, adoption of context and
+Canonical input selection, conflicting signed packets, adoption of genesis and
 availability must be specified before one-step verification can resolve them.
 
 ## Implemented experimental off-chain format
@@ -51,9 +51,39 @@ This domain is deliberately distinct from the future escrow-bound protocol.
 Its context hash commits match ID, full numeric rules/genesis hash with semantic revision,
 both session addresses and public-key hashes. V1 packets do not sign this context.
 It cannot be upgraded to an escrow authorization by attaching a chain ID later.
-The future signature/trace version must bind chain, arena, challenge, both main
-wallets and delegated keys, match, complete rules/version and escrow terms before
-play begins. No v1 root is accepted for settlement by this implementation.
+The future protocol should authenticate a fresh random UUID-like genesis ID
+against its immutable escrow record once, before play. That binding identifies
+chain, arena, challenge, main-wallet participants, delegated session keys,
+canonical protocol version and escrow terms. Authenticated genesis/session
+adoption must prevent reusing a nonce or signed history in another escrow,
+including another chain or contract; a local lookup or bare nonce is insufficient.
+Subsequent move signatures may bind that genesis ID and their chained move fields
+without redundantly carrying every escrow field. No per-move repetition of the
+full context is required when the genesis binding is sound.
+
+Current live `makeMatchId()` generates a fresh random 256-bit bytes32 ID, which
+serves the intended UUID-like role. First and later move digests include this ID;
+zero previous hashes are sentinels, not a shared match identity. The deterministic
+sample generator deliberately uses a fixed fixture ID and is not matchmaking.
+The current escrow does not yet enforce unique genesis registration or
+cross-domain authenticated adoption. That remains a prerequisite to settlement.
+
+## One canonical game version
+
+There are no configurable per-match damage, timing, physics, or other combat
+parameters. `src/protocol.ts` exports the fixed canonical version, immutable
+legacy v1 metadata and canonical fingerprint. The fingerprint is computed once
+from the canonical implementation's constants, semantic revision and initial
+state, not from caller-supplied match settings. Its bytes are unchanged by this
+clarification/refactor. It identifies a version for replay and compatibility.
+A future global gameplay revision needs a new version/fingerprint; it is not a
+new set of options that players negotiate at matchmaking.
+
+The old transcript `rules` object remains only for v1 wire compatibility and must
+exactly match the canonical values. It never drives simulation parameters. The
+contract's `rulesHash` argument is retained as a version identifier, but only the
+single canonical fingerprint is accepted. Escrow stake and response deadlines
+remain escrow terms; they do not configure the game timer or physics.
 
 All hashes use Keccak-256 of Solidity ABI encoding, not JSON. Domain tags are
 `keccak256(UTF8("CryptoFighter:experimental-offchain-trace-v1:" + suffix))`.
@@ -105,7 +135,7 @@ rebuilt output when importing a claim.
 
 ## Required settlement/dispute state machine (not implemented)
 
-1. Freeze escrow context and session delegations before signing inputs. Claims
+1. Authenticate the unique genesis-to-escrow binding and session delegations before signing inputs. Claims
    bind root, format/rules/context, terminal frame, encoded terminal state and
    outcome. Authenticate genesis and terminal endpoint membership with bounded
    proofs. Terminal outcome/frame fields must match the revealed terminal state.
@@ -120,7 +150,7 @@ rebuilt output when importing a claim.
    responses must be authenticated before updating the bracket. At most nine
    rounds isolate adjacent indices for the 300-transition horizon.
 4. With adjacent endpoints, reveal the agreed pre-state and checkpoint fields,
-   the two context-bound signed input packets, claimed post-state/checkpoint,
+   the two genesis-bound signed input packets, claimed post-state/checkpoint,
    and bounded membership proofs. Verify exactly that one deterministic
    transition and its packet/self/ack/frame-chain updates. For an already
    terminal pre-state, the sole valid normalized step preserves the checkpoint

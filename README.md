@@ -19,6 +19,25 @@ This document separates the implementation that exists from designs that do not.
 
 **New Match** generates a fresh session wallet and match ID, resets state/transcript, sends an identity-bearing RESET_MATCH, and repeats HELLO. Session keys are not durable account keys.
 
+## Canonical protocol and match genesis
+
+There is one canonical ruleset at a time. Damage, timer, movement, physics and
+other gameplay behavior are compiled constants, not match settings.
+[src/protocol.ts](src/protocol.ts) identifies that version with a fixed fingerprint.
+The legacy transcript `rules` object is descriptive metadata; altered values
+fail verification. The escrow accepts only the canonical fingerprint.
+
+Each live match starts with a fresh cryptographically random 256-bit `matchId`,
+a UUID-like genesis nonce. Every move digest includes that ID, so identical
+moves in different matches have distinct chains. Initial zero hashes are only
+previous-link sentinels. The fixed ID in the transcript generator is test-only.
+
+The intended next step is authenticating that genesis once against the unique,
+immutable escrow record and canonical version. Later move signatures can rely on
+that binding without repeating all escrow fields. Unique registration and secure
+cross-chain/contract genesis adoption are not implemented yet; randomness alone
+does not establish that authorization.
+
 ## Deterministic cumulative GameState
 
 [game.ts](src/game.ts) defines the pure transition(previousState, p1Mask, p2Mask) function. Each canonical frame applies one transition to the preceding state; state is cumulative.
@@ -221,7 +240,7 @@ Only the chain's native token is accepted through payable calls. **ERC-20 and st
 
 ### Challenge and join
 
-challenge requires non-zero native stake, matchId, rulesHash, P1 session address, and at least a 24-hour response window. It stores an open challenge and context hash over chain ID, contract, challenge ID, P1 main wallet, stake, match ID, rules hash, P1 session key, and window. Optional expectedOpponent is stored/emitted but omitted from the initial context-hash calculation.
+challenge requires non-zero native stake, matchId, P1 session address, the sole canonical rulesHash, and at least a 24-hour response window. rulesHash identifies the canonical game version; it does not configure gameplay. It stores an open challenge and context hash over chain ID, contract, challenge ID, P1 main wallet, stake, match ID, rules hash, P1 session key, and window. Optional expectedOpponent is stored/emitted but omitted from the initial context-hash calculation.
 
 join requires Open status, a caller other than P1, exactly equal stake, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key, makes the match Active, and extends matchContextHash with P2 main/session addresses.
 
@@ -252,7 +271,7 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 | Non-zero identifiers/session keys and 24h minimum | Enforced |
 | Session delegation | Inferred from a main wallet committing its own session address |
 | Disclosed next packets: digest/signers/frame/slots/match/masks/self links | Enforced only in disputeResult |
-| rulesHash contents | Opaque non-zero value; trusted |
+| rulesHash | Must equal the sole canonical version fingerprint |
 | Outcome, final frame, frame head, packet heads | Claimant supplied; minimal checks only |
 | Canonical chain/full transcript | Not checked |
 | Transition, HP, timer, terminality, winner | Not implemented on-chain |
@@ -300,7 +319,7 @@ must eventually be replaced. No full-transcript on-chain replay fallback is plan
 - Wrong outcome at the true final frame cannot be disproved by continuation.
 - Pre-signed delayed inputs can falsely satisfy continuation after round end.
 - Unauthenticated timeout hashes can produce unjustified forfeits.
-- Rules and claim fields are largely trusted; Solidity has no game verifier.
+- The canonical rules fingerprint is enforced, but outcome/trace claim fields remain trusted; Solidity has no game verifier.
 - Packet signatures omit chain, contract, challenge, matchContextHash, and rulesHash domain; reused match IDs create ambiguity.
 - Solidity does not explicitly enforce low-S or validate v before ecrecover.
 - PeerJS/browser memory are not hardened custody, privacy, availability, or DoS systems; reset/reload loses keys.
@@ -312,7 +331,7 @@ must eventually be replaced. No full-transcript on-chain replay fallback is plan
 
 ## Staged roadmap
 
-1. **Freeze off-chain specification:** versioned encoding/schema, rule negotiation, mask bounds, golden vectors, and browser/CLI parity tests.
+1. **Freeze off-chain specification:** versioned encoding/schema, canonical-version agreement, mask bounds, golden vectors, and browser/CLI parity tests.
 2. **Authenticate execution:** co-signed canonical receipts or commit-reveal plus execution acknowledgements; remove delay ambiguity.
 3. **Build proof primitives:** canonical state, trace leaves, Merkle proofs, bisection, one-step verifier, and availability rules.
 4. **Replace timeout scaffolding:** authenticated relationships and adversarial deadline/stall/non-response tests.

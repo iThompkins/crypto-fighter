@@ -6,6 +6,10 @@ pragma solidity ^0.8.24;
 ///      Result claims are optimistic and remain experimental until an execution
 ///      proof can distinguish canonical continuation from delayed pre-signed inputs.
 contract CryptoFighterArena {
+    /// @notice Identifies the sole canonical game version; never match configuration.
+    /// @dev Must equal src/protocol.ts. Deployment tests check byte-for-byte parity.
+    bytes32 public constant CANONICAL_RULES_HASH =
+        0x1ae89ee81810335d8b8b2ee8d7e9237fef05704a9fae836f3e748fcafdca65cc;
     /// @dev Temporary containment, not a settlement security proof. No override.
     ///      This prototype must only be exercised with valueless local test funds.
     constructor() {
@@ -198,7 +202,7 @@ contract CryptoFighterArena {
     ) external payable returns (uint256 challengeId) {
         require(msg.value > 0, "stake required");
         require(matchId != bytes32(0), "matchId required");
-        require(rulesHash != bytes32(0), "rulesHash required");
+        require(rulesHash == CANONICAL_RULES_HASH, "unsupported canonical rules");
         require(p1SessionKey != address(0), "session key required");
         require(
             responseWindowSeconds >= MIN_RESPONSE_WINDOW_SECONDS,

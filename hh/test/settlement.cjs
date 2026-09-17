@@ -51,7 +51,7 @@ async function deploy() {
 
 async function openMatch(arena, p1, p2, stake, windowSec = 24 * 3600) {
   const matchId = rand32();
-  const rulesHash = ethers.id("rules-v1");
+  const rulesHash = await arena.CANONICAL_RULES_HASH();
   const p1Session = ethers.Wallet.createRandom();
   const p2Session = ethers.Wallet.createRandom();
 
@@ -143,7 +143,7 @@ describe("CryptoFighterArena settlement", function () {
     const stake = ethers.parseEther("1");
     const arena = await deploy();
     const matchId = rand32();
-    const rulesHash = ethers.id("rules-v1");
+    const rulesHash = await arena.CANONICAL_RULES_HASH();
     const session = ethers.Wallet.createRandom();
 
     await assert.rejects(

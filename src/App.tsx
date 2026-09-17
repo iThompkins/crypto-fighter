@@ -3,10 +3,11 @@ import Peer, { type DataConnection } from "peerjs";
 import { addressFromPublicKey, createSessionWallet, hashFrameFields, hashJson, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
 import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, INPUT_DELAY, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
 import { short } from "./format";
-import { arena, connectWallet, outcomeFromWinner, rulesHash, stakeWei } from "./chain";
+import { arena, connectWallet, outcomeFromWinner, CANONICAL_RULES_HASH, stakeWei } from "./chain";
 import type { Signer } from "ethers";
 import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
+import { CANONICAL_V1_RULES } from "./protocol.ts";
 import { isValidV1InputMask } from "./input-mask";
 import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
@@ -687,10 +688,9 @@ export default function App() {
       setLastError("");
       if (!wallet) throw new Error("Session wallet not ready.");
       const contract = requireArena();
-      const rHash = rulesHash({ fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true, inputDelay: INPUT_DELAY });
       const opp = expectedOpponent.trim() || "0x0000000000000000000000000000000000000000";
       const windowSec = Number(responseWindowSec) || 0;
-      const tx = await contract.challenge(matchIdRef.current, rHash, wallet.address, opp, windowSec, { value: stakeWei(stakeEth) });
+      const tx = await contract.challenge(matchIdRef.current, CANONICAL_RULES_HASH, wallet.address, opp, windowSec, { value: stakeWei(stakeEth) });
       log(`challenge tx: ${short(tx.hash, 14)}`);
       const rc = await tx.wait();
       let id = "";
@@ -840,7 +840,7 @@ export default function App() {
     return {
       version: 1,
       matchId,
-      rules: { fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true, inputDelay: INPUT_DELAY },
+      rules: CANONICAL_V1_RULES,
       players: {
         p1: { slot: 1, address: p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
         p2: { slot: 2, address: !p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: !p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },

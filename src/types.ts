@@ -51,6 +51,7 @@ export type TranscriptPlayer = {
 export type MatchTranscript = {
   version: 1;
   matchId: string;
+  // Legacy v1 metadata: must equal the canonical constants, never match options.
   rules: {
     fps: number;
     roundFrames: number;

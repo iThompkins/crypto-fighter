@@ -1,9 +1,9 @@
 import { addressFromPublicKey, hashFrameFields, hashJson, hashPacketFields, verifyPacket, ZERO32 } from "./crypto.ts";
-import { FPS, INPUT_DELAY, MAX_HP, ROUND_FRAMES, initialState, transition } from "./game.ts";
+import { INPUT_DELAY, MAX_HP, ROUND_FRAMES, initialState, transition } from "./game.ts";
 import { isValidV1InputMask } from "./input-mask.ts";
 import type { GameState, MatchTranscript, SignedInputPacket } from "./types.ts";
 
-export const V1_RULES = Object.freeze({ fps: FPS, roundFrames: ROUND_FRAMES, maxHp: MAX_HP, oneOutstandingPacket: true, inputDelay: INPUT_DELAY });
+import { CANONICAL_V1_RULES as V1_RULES } from "./protocol.ts";
 export type TranscriptVerificationResult = {
   ok: boolean;
   complete: boolean;

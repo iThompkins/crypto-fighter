@@ -1,5 +1,5 @@
 import { BrowserProvider, Contract, parseEther, type Eip1193Provider, type Signer } from "ethers";
-import { hashJson } from "./crypto.ts";
+export { CANONICAL_RULES_HASH } from "./protocol.ts";
 import type { GameState } from "./types";
 
 // Minimal human-readable ABI for the settlement calls the UI needs.
@@ -23,11 +23,6 @@ export function outcomeFromWinner(winner: GameState["winner"]): number {
   if (winner === "P2") return Outcome.P2;
   if (winner === "TIE_BOTH_LOSE") return Outcome.Tie;
   return Outcome.None;
-}
-
-// Stable rules hash committed on-chain and referenced by the transcript.
-export function rulesHash(rules: unknown): string {
-  return hashJson(rules);
 }
 
 function injected(): Eip1193Provider {

@@ -109,7 +109,9 @@ export function hashJson(value: unknown): string {
   return keccakHex(new TextEncoder().encode(JSON.stringify(value)));
 }
 
-// A random 32-byte match id (bytes32) so the contract can bind signed packets to it.
+// Fresh 256-bit random genesis identifier for each live match (UUID-like nonce).
+// Every move digest includes it; zero previous hashes are only chain sentinels.
+// Escrow-domain authentication of this identifier is a separate protocol step.
 export function makeMatchId(): string {
   return "0x" + bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
 }

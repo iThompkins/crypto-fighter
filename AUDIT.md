@@ -163,3 +163,31 @@ browser tests, lint and build. An additional received-commitment regression and
 CLI check brings the Node suite to 49 tests. Bisection transactions, minimal
 Solidity transition adjudication and authenticated dispute timeouts remain
 unimplemented. Real-money activity remains disabled.
+
+## Canonical rules and unique genesis clarification
+
+The user clarified that there is one canonical gameplay/protocol version at a
+time, never per-match damage, timer or physics settings. Inspection confirmed
+the game used compiled constants, strict replay rejected altered rules metadata,
+and the trace fingerprint was already fixed globally. The misleading surfaces
+were a generic `rulesHash(rules)` helper and escrow acceptance of any nonzero
+rules hash.
+
+Centralized fixed metadata, state encoding and the existing byte-identical
+fingerprint in `src/protocol.ts`; removed the arbitrary-rules helper. Browser
+export and verifier now share canonical metadata. The contract accepts only the
+canonical fingerprint, with matching off-chain/on-chain regression coverage.
+Legacy v1 metadata and trace roots are preserved; no combat rule changed.
+
+Live IDs already use fresh random 256-bit genesis nonces. Each move digest
+includes that ID, making its first move and subsequent chains match-specific;
+zero previous hashes are only sentinels. Fixture IDs remain intentionally fixed.
+The intended binding is an authenticated unique genesis-to-escrow record before
+play; moves may reference that genesis without repeating the record's fields.
+Docs now explicitly preserve that design. Secure unique registration and
+cross-domain genesis/session adoption remain unfinished; randomness is not
+authorization and these changes do not enable settlement.
+
+Validation: lint/build passed, all 51 Node tests passed, all 28 contract tests
+passed, and both browser tests passed. The canonical-rules rejection test checks
+decoded revert data because viaIR source mapping omitted Hardhat's reason text.
