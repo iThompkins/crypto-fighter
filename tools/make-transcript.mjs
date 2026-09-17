@@ -26,8 +26,9 @@ const packetHash = (m, f, pl, im, ps, po) => kec(cat([b32(m), uint(f), uint(pl),
 const frameHash = (m, f, a, b, pf) => kec(cat([b32(m), uint(f), uint(a), uint(b), b32(pf)]));
 const addr = (pubHex) => { const p = hexToBytes(strip(pubHex)); return "0x" + bytesToHex(keccak_256(p.length === 65 ? p.slice(1) : p)).slice(-40); };
 
-function wallet() {
-  const priv = secp.utils.randomPrivateKey();
+// Public fixture-only identities; never used for browser or escrow wallets.
+function wallet(scalar) {
+  const priv = hexToBytes(scalar.toString(16).padStart(64, "0"));
   const publicKey = "0x" + bytesToHex(secp.getPublicKey(priv, false));
   return { priv, publicKey, address: addr(publicKey) };
 }
@@ -86,8 +87,8 @@ function transition(prev, m1, m2) {
 }
 
 async function main() {
-  const matchId = "0x" + bytesToHex(secp.etc ? crypto.getRandomValues(new Uint8Array(32)) : new Uint8Array(32));
-  const p1 = wallet(), p2 = wallet();
+  const matchId = "0x" + "11".repeat(32);
+  const p1 = wallet(1), p2 = wallet(2);
   let state = initial();
   const D = 2; // input delay
   const hist = { 1: {}, 2: {} };

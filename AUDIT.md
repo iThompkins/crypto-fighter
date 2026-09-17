@@ -85,3 +85,26 @@ sandbox child-process output caused failures), and 27 contract tests pass,
 including direct construction rejection on a simulated foreign chain. Node tests
 now use a TypeScript loader compatible with Node 20. CLI verification uses
 `process.exitCode` so normal output can drain before process termination.
+
+## Reproducible harness increment
+
+`npm run check` now composes JS/TS lint, Node tests, production build, actual
+contract tests, and a repository-local Playwright suite. Playwright and PeerJS
+server are pinned development dependencies. Browser servers use loopback, no
+external signaling/STUN, and real WebRTC channels. System Chromium can be selected
+with `CHROMIUM_PATH`; otherwise install Playwright Chromium once. Old smoke
+entry points forward to the suite; stale arena simulation and browser escrow
+scripts now fail explicitly rather than exercise a different protocol.
+
+Hardhat uses pinned npm `solc` 0.8.26 and repository-owned XDG directories.
+A forced compile passed without the compiler downloader. Sandbox child-process
+output truncation still requires approved outside-sandbox execution in this
+workspace; browser tests also need permission to bind loopback sockets.
+
+Validation: combined check passed (9 Node tests, 27 contract tests, 2 browser
+tests), followed by a tenth Node regression for byte-for-byte fixture generation.
+Browser tests verified a terminal P1 replay against the CLI and an entire live
+300-frame idle match, matching both peers' canonical histories and final state.
+Lint now includes JS harnesses; production build retains its bundle-size warning.
+These checks do not cover disconnect/reconnect, malicious handshakes, or prove
+settlement security. Strict transcript completeness/context remains next.

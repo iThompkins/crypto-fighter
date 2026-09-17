@@ -311,19 +311,30 @@ Open the Vite URL in two tabs.
 4. Click **Connect** in the joiner tab.
 5. Click **Start Match**.
 
-For headless smoke testing, build and preview first:
+For reproducible validation after `npm ci`:
 
 ~~~bash
-npm run build
-npm run preview
+npx playwright install chromium  # one-time browser setup
+npm run check                   # lint, Node tests, build, contract and browser tests
 ~~~
 
-Then in another shell:
+On a machine with system Chromium (including this ARM64 workspace), use:
 
 ~~~bash
-PLAYWRIGHT_BROWSERS_PATH=/home/node/.openclaw/workspace/.cache/ms-playwright node self-play.cjs
-npm run verify-match -- crypto-fighter-self-play-transcript.json
+CHROMIUM_PATH=/usr/bin/chromium npm run check
 ~~~
+
+The browser suite starts and stops its own Vite and PeerJS servers on loopback
+ports 4175 and 9001, with external STUN disabled. Those ports must be free. It
+checks a generated terminal replay against the CLI and runs two actual WebRTC
+peers through a 300-frame idle round, comparing exported canonical histories and
+final state. It also asserts that browser settlement remains disabled. No wallet,
+external signaling service, external RPC, or real funds are used. Failure traces
+and exported transcripts are retained in ignored `test-results/`.
+
+`npm run test:browser` runs only that suite. The older `check-app.cjs`,
+`connect-two-tabs.cjs`, and `self-play.cjs` commands forward to its relevant tests.
+`capture-app.cjs` remains a screenshot utility requiring a running preview server.
 
 ## Scripts
 
@@ -351,27 +362,21 @@ The Hardhat harness is isolated in hh/:
 npm run test:contract        # deploy to a local EVM; assert happy path + dispute
 ~~~
 
-To click through the UI against a local chain (stand-in for MetaMask):
+The harness uses lockfile-pinned `solc` 0.8.26 without compiler downloads and
+stores its configuration/cache in `.cache/hardhat/`. Tests create only valueless,
+in-process EVM contracts, including a negative test with simulated chain ID 1.
+Browser settlement and the old `hh/e2e-onchain.cjs` workflow are disabled.
 
-~~~bash
-# 1. start a local node (unlocked funded accounts)
-cd hh && XDG_CACHE_HOME="$PWD/../.cache/xdg" ../node_modules/.bin/hardhat node
-
-# 2. deploy the contract (new shell)
-cd hh && XDG_CACHE_HOME="$PWD/../.cache/xdg" ../node_modules/.bin/hardhat run scripts/deploy.cjs --network localhost
-
-# 3. serve the app, connect MetaMask to local RPC, paste Arena address
-npm run build && npm run preview
-~~~
-
-In **On-chain settlement**, connect the main wallet, paste Arena address, set native stake, then P1 **Challenge** and P2 **Join**. After the round a participant may **Claim Result** and, after the window, **Finalize**. The headless flow is [e2e-onchain.cjs](hh/e2e-onchain.cjs).
+`simulate-arena` now exits with a retirement notice: its former JavaScript model
+used a different protocol and must not be treated as contract validation. Use
+`npm run test:contract` for the actual Solidity behavior.
 
 ## Source layout
 
 ~~~text
 contracts/CryptoFighterArena.sol  native escrow/result/timeout prototype
 hh/test/settlement.cjs            local contract tests
-hh/e2e-onchain.cjs                headless local-chain/UI flow
+test/browser/gameplay.spec.mjs   local browser gameplay/replay checks
 tools/verify-match.mjs            standalone transcript verifier/replayer
 src/App.tsx                       UI, PeerJS, realtime validation
 src/chain.ts                     injected wallet and minimal Arena ABI

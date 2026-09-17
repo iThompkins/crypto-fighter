@@ -37,3 +37,5 @@ crypto-fighter-*.json
 # demo screenshots
 shots/
 decisive-transcript.json
+test-results/
+playwright-report/

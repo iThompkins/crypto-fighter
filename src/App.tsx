@@ -30,6 +30,7 @@ function createPeer() {
     port: Number(import.meta.env.VITE_PEER_PORT || 9000),
     path: import.meta.env.VITE_PEER_PATH || "/",
     secure: import.meta.env.VITE_PEER_SECURE === "true",
+    ...(import.meta.env.VITE_PEER_NO_STUN === "true" ? { config: { iceServers: [] } } : {}),
   });
 }
 
@@ -931,7 +932,7 @@ export default function App() {
             <div style={styles.rowWrap}>
               <div>
                 <div style={styles.label}>Your Peer ID</div>
-                <div style={styles.codeBox}>{peerId || "initialize first"}</div>
+                <div data-testid="peer-id" style={styles.codeBox}>{peerId || "initialize first"}</div>
               </div>
               <button style={styles.smallButton} onClick={() => void copy(peerId)} disabled={!peerId}>
                 Copy
