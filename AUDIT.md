@@ -269,3 +269,29 @@ Final validation after removing the unfinished verifier: full
 checks, 41 contract tests and 2 browser tests. The existing bundle-size warning
 remains. The new geometry regression passes by documenting the codec failure;
 it is not evidence that the failure has been repaired.
+
+## Exact horizontal numeric-domain analysis — 2026-09-17
+
+Analyzed the unchanged native transition before any trace-format decision.
+Repeated independent clamp/recollision cycles reach eighths, sixteenths, and
+every precision through 47 fractional bits. An adjusted final recollision reaches
+48 bits by frame 203. The two scale 2^48 numerators are odd, proving tightness.
+An inductive binary64 spacing proof bounds every stored x coordinate to the
+2^-48 lattice in [0,692]; see docs/HORIZONTAL_NUMERIC_DOMAIN.md.
+
+The actual simulator does not refine indefinitely. An ideal unrounded rational
+version would do so if its timer were removed; native rounding and terminal
+absorption prevent that. Exact integer state words fit in 58 unsigned bits, but
+integer transition arithmetic must reproduce binary64 rounding after each
+operation. The analysis includes a concrete case where unrounded averaging
+diverges from the existing game.
+
+Added test-only BigInt rounding-oracle checks, a complete 300-frame tight witness,
+all 256 mask pairs at ten reachable states, bounded exhaustive motion exploration
+and 64 seeded complete matches. Neither these tests nor the analysis alter
+gameplay, the codec, canonical fingerprint, genesis authority or settlement.
+
+Validation: lint and all 63 Node tests pass. New bounded searches checked 154,836
+reachable motion transitions; seeded properties checked 18,790 transitions across
+64 full matches, in addition to 2,560 mask-pair cases and the exact witness.
+Independent read-only review confirmed the proof and rounding oracle.

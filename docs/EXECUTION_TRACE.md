@@ -123,9 +123,12 @@ reject it because doubled quarter coordinates are not integers.
 `test/trace-geometry-blocker.test.mjs` preserves the complete authenticated
 reproduction. The single-transition implementation was withdrawn before commit
 because it relied on the false invariant. Do not round these coordinates or
-silently alter collision/clamping behavior. A new exact encoding/version and
-its precision analysis require approval before implementing the verifier.
-Merely changing the scale to four does not establish a general precision bound.
+silently alter collision/clamping behavior. A new encoding/version still requires
+approval before implementing the verifier. The subsequent
+[horizontal numeric-domain analysis](HORIZONTAL_NUMERIC_DOMAIN.md) proves a tight
+2^-48 lattice for stored x values, reached by frame203. This establishes an exact
+bounded integer representation, but matching transitions also requires preserving
+ordered binary64 rounding. Scale4 is not sufficient. The trace format is unchanged.
 
 ### Checkpoints, leaves and padding
 
