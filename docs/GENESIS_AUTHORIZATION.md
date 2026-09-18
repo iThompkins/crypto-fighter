@@ -108,9 +108,10 @@ to avoid unsafe number coercion.
 
 Remote acknowledgement validation still belongs to the authenticated packet
 pipeline. This signer does not infer network receipt from a caller-supplied hash.
-The current browser UI continues to run practice games; it does not yet integrate
-this funded-match lifecycle. The library is exercised with real local EVM records
-and browser/Node cryptography tests. No session keys are persisted or recovered.
+The browser now integrates this authorization boundary with authenticated live
+play and durable public evidence; see [Phase B](PHASE_B.md). Its escrow path requires
+a local provider lookup and both authorization signatures before readiness.
+No session private keys are persisted or recovered, and settlement remains disabled.
 
 ## Authorized trace commitments
 
@@ -145,9 +146,9 @@ Hardhat record and checks genesis/interior/terminal/padded-terminal openings in
 Solidity, including wrong-domain/index/length rejection.
 
 Claims, roots and midpoint turns/deadlines are now frozen in the arena.
-Phase A resolves the former numeric encoding blocker. Phase B must next integrate
+Phase A resolves the former numeric encoding blocker. Phase B integrates
 authorized browser matches, authenticated lifecycle/input chains and durable
-evidence. Checking the isolated transition with a canonical minimal step verifier
+evidence; see [its current guarantees](PHASE_B.md). Checking the isolated transition with a canonical minimal step verifier
 belongs to a later phase. Resolving a step must not blindly certify every other
 state of a challenger's trace. Availability and result replacement/refund rules
 must be resolved and tested before enabling payouts. Full-transcript on-chain

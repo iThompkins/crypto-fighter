@@ -82,8 +82,8 @@ serves the intended UUID-like role. First and later move digests include this ID
 zero previous hashes are sentinels, not a shared match identity. The deterministic
 sample generator deliberately uses a fixed fixture ID and is not matchmaking.
 The arena now enforces unique registration and both session authorizations over
-the immutable cross-domain binding. Funded browser lifecycle integration remains
-pending; practice games do not implicitly gain escrow authority.
+the immutable cross-domain binding. The [Phase B browser lifecycle](PHASE_B.md) requires explicit local escrow
+authorization; practice games do not implicitly gain escrow authority.
 
 ## One canonical game version
 
@@ -190,9 +190,9 @@ rebuilt output when importing a claim.
 ## Next implementation boundary
 
 Genesis authorization helpers, trace claims and midpoint turns/deadlines are
-implemented, but live browser match/input authentication is incomplete. Phase A
-state-encoding migration is complete. Phase B must next establish authenticated
-match lifecycle and input chains, including reconnect and durable evidence.
+implemented. Phase A state-encoding migration and Phase B authenticated live
+lifecycle/input chains, reconnect, and durable public evidence are in place; see
+[Phase B](PHASE_B.md) for the exact trust and recovery boundaries.
 Single-transition adjudication, authenticated timeout resolution and settlement
 integration belong to later phases and must consume those Phase B guarantees. No full-transcript on-chain
 replay fallback is permitted. Replacement, equivocation, both-invalid and

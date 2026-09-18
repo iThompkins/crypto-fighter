@@ -349,3 +349,57 @@ tests, build, 43 contract tests and both browser tests. The initial sandbox run
 failed on Node subprocess EPERM; the outside-sandbox rerun passed in full. The
 existing bundle-size warning remains. Settlement/deployment containment is
 unchanged. Phase A is ready for its local checkpoint; Phase B remains pending.
+
+### Phase B evidence foundation — 2026-09-18
+
+Added an authorized-genesis evidence collector with session-bound signature
+checks, immutable snapshots, duplicate handling, retained signed equivocations,
+and separate missing-dependency / observed-chain-mismatch diagnostics. Local
+liveness observations have no winner or financial authority. Tests exercise
+forgery, late conflicts, caller mutation, retransmission, and delayed dependencies.
+
+`docs/PHASE_B.md` records the durable architectural separation of protocol
+faults, liveness recovery, and higher-layer behavior policy. It requires an
+objective eventual escape from every funded state without equating ordinary
+disconnects with cheating. No reputation system or settlement changes were made.
+This is a foundation, not Phase B completion: browser lifecycle integration and
+crash-durable evidence persistence remain outstanding.
+
+Validation: `npm test` passed all 78 tests (rerun outside the sandbox after
+subprocess EPERM restrictions); `npm run lint`, `npm run build`, and
+`git diff --check` passed. Build retains the existing bundle-size warning.
+
+### Phase B — authenticated live lifecycle and durable evidence, 2026-09-18
+
+Replaced the browser's ad hoc packet admission and unsigned start/reset handling
+with a serialized live controller. Fresh signed discovery challenges pin the
+connection identity; immutable practice/escrow descriptors and two signed READY
+statements gate inputs. Exact schemas, participant/domain/signature checks,
+recursive dependency validation, bounded reordering, and connection/controller
+generations gate authoritative mutation. Local preparation actions are serialized
+so delayed chain lookups cannot race match creation.
+
+IndexedDB transaction completion precedes outgoing sends, incoming use, and
+chained acknowledgement signing. Public genesis consent is committed before
+export. The journal retains authorization/provenance, readiness, signed input
+chains and conflicts, plus bounded local connection observations. Successful
+commits interrupted by a transport-generation change are reconciled before
+reconnect can resume; a conflict committed during that interval still halts play.
+Private keys remain ephemeral. Recovery is inspection-only, and local reset
+preserves prior journals while creating new keys/genesis.
+
+The collector owns duplicate/conflict handling and recursive chain admission;
+retransmission replies reuse committed signatures. Disconnects, gaps, and storage
+failures do not award a winner. Settlement transaction gates remain unchanged;
+no reputation, forfeiture, payout, or timeout economics were added. Phase C/D/E
+still need execution adjudication, availability/replacement policy, and objective
+escrow escape paths before funding or settlement can be enabled. See PHASE_B.md.
+
+Final Phase B validation: 92 Node tests, 43 contract tests, and 5 browser tests
+passed. Browser coverage includes complete two-peer histories, real disconnect/
+reconnect, reload inspection, atomic journal initialization, and the escrow UI
+against a fixture RPC, including an RPC-delayed consent/start race. Existing
+Hardhat coverage separately verifies actual genesis activation. Build, lint, and
+`git diff --check` passed; the existing bundle-size warning remains. Independent
+read-only review findings were fixed and rechecked. Phase B is complete; later
+adjudication, availability, and escrow economics phases remain outside this work.

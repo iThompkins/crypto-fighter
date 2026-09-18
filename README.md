@@ -19,14 +19,14 @@ payout/recovery remain unimplemented. Settlement stays disabled.
 
 1. Page load creates an ephemeral secp256k1 session wallet in browser memory, separate from any injected main wallet.
 2. One player initializes **Host Tab** (P1). The other initializes **Joiner Tab** (P2), pastes the host Peer ID, and connects through PeerJS.
-3. HELLO carries the host-selected matchId, player slot, session address, and uncompressed public key. The receiver checks the expected remote slot and derives the address from the key. The joiner adopts the host match context.
-4. The host starts the match. Each peer samples its own keyboard, signs inputs ahead of simulation, validates remote packets, and advances only when the next P1/P2 pair exists.
+3. Each connection exchanges fresh challenges and signed HELLO responses. Runtime schema, signature, challenge, slot, and pinned session identity are checked before discovery is admitted.
+4. The host offers an immutable practice or locally verified escrow descriptor. Both peers persist signed readiness, then persist authenticated inputs before sending, acknowledging, or simulating them. Only recursively valid input pairs advance play.
 5. Simulation stops when HP reaches zero or the 300-frame timer expires. Either peer can export and replay the packet/canonical-frame transcript.
 6. The settlement panel connects a main wallet and exposes challenge, join, claimResult, and finalizeResult. All four transaction actions are disabled pending a complete security model. It does not expose dispute, timeout, or cancellation calls.
 
 **Controls (symmetric):** A/D or left/right arrows move, W or up-arrow jumps, and Space, F, J, K, or / attacks. Each peer controls only its assigned fighter.
 
-**New Match** generates a fresh session wallet and match ID, resets state/transcript, sends an identity-bearing RESET_MATCH, and repeats HELLO. Session keys are not durable account keys.
+**New Match** closes the local session and connection, preserves its evidence journal, and generates a fresh session wallet and match ID. Reconnect the peers for the new match. Remote reset messages are rejected. Reload recovers inspection evidence, never the old signing key.
 
 ## Canonical protocol and match genesis
 
@@ -45,8 +45,9 @@ The arena now permanently registers that genesis and requires both delegated
 session keys to authorize the completed immutable escrow binding once. Later
 move signatures rely on that binding without repeating its fields. See
 [genesis authorization](docs/GENESIS_AUTHORIZATION.md) for the protocol and tested
-limits. The browser still runs practice games; funded lifecycle integration and
-production dispute settlement remain disabled.
+limits. The browser supports practice and explicitly loaded, independently verified
+escrow-authorized matches. Funding and production settlement remain disabled.
+See [Phase B lifecycle and persistence](docs/PHASE_B.md) for admission and recovery guarantees.
 
 ## Deterministic cumulative GameState
 
@@ -308,6 +309,8 @@ Implemented now: experimental off-chain trace construction from a strictly
 verified terminal transcript, canonical ABI integer-state encoding, ordered Merkle trees,
 and bounded checkpoint membership proofs. Phase A fixed-point migration resolves
 the former quarter-unit encoding blocker. One-step adjudication is still pending.
+[Phase B status and policy boundaries](docs/PHASE_B.md) document the authenticated
+live authentication, durable evidence, and reload/reconnect behavior.
 Authenticated but unexecuted delayed inputs cannot alter the root. Browser and CLI use the same implementation.
 
 ~~~bash
@@ -408,8 +411,9 @@ The browser suite starts and stops its own Vite and PeerJS servers on loopback
 ports 4175 and 9001, with external STUN disabled. Those ports must be free. It
 checks a generated terminal replay against the CLI and runs two actual WebRTC
 peers through a 300-frame idle round, comparing exported canonical histories and
-final state. It also asserts that browser settlement remains disabled. No wallet,
-external signaling service, external RPC, or real funds are used. Failure traces
+final state. It also tests disconnect/reconnect, IndexedDB recovery, inspection-only
+reload, and escrow authentication through a fixture wallet/RPC. Settlement remains
+disabled. No external wallet, signaling service, RPC, or real funds are used. Failure traces
 and exported transcripts are retained in ignored `test-results/`.
 
 `npm run test:browser` runs only that suite. The older `check-app.cjs`,
