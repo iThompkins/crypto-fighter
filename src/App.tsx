@@ -1,26 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Peer, { type DataConnection } from "peerjs";
-import { addressFromPublicKey, createSessionWallet, hashFrameFields, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
-import { toDisplayUnits, FIGHTER_W, FIGHTER_H, encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, INPUT_DELAY, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
+import { addressFromPublicKey, createSessionWallet, makeMatchId, ZERO32 } from "./crypto";
+import { toDisplayUnits, FIGHTER_W, FIGHTER_H, encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, MAX_HP, ROUND_FRAMES, WIDTH } from "./game";
 import { short } from "./format";
 import { arena, connectWallet, outcomeFromWinner, CANONICAL_RULES_HASH, stakeWei } from "./chain";
 import type { Signer } from "ethers";
 import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
 import { CANONICAL_RULES, hashTraceState } from "./protocol.ts";
-import { isValidV1InputMask } from "./input-mask";
-import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
+import { LiveMatch, configHash, hex, object, verifyReady, type LiveConfig } from "./live-match";
+import { BrowserEvidenceStore } from "./evidence-store";
+import { hello, verifyHello } from "./live-discovery";
+import { createGenesisSession, hashGenesisBinding, verifyGenesisConsent, readGenesisRecord, type GenesisAuthorization, type GenesisRecord } from "./genesis";
+import type { CanonicalFrame, GameState, MatchTranscript, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
 // Keys the game consumes; preventDefault so arrows/space don't scroll the page.
 const GAME_KEYS = new Set(["a", "d", "w", "arrowleft", "arrowright", "arrowup", " ", "f", "j", "k", "/"]);
-
-function sessionIdentityMatches(address: string, publicKey: string) {
-  try {
-    return addressFromPublicKey(publicKey).toLowerCase() === address.toLowerCase();
-  } catch {
-    return false;
-  }
-}
 
 function createPeer() {
   const host = import.meta.env.VITE_PEER_HOST;
@@ -85,35 +80,37 @@ export default function App() {
   const arenaWrapRef = useRef<HTMLDivElement>(null);
   const peerRef = useRef<Peer | null>(null);
   const connRef = useRef<DataConnection | null>(null);
+  const challengeRef = useRef(makeMatchId());
+  const authenticatedConnRef = useRef<DataConnection | null>(null);
   const intervalRef = useRef<number | null>(null);
   const keyState = useRef<Record<string, boolean>>({});
-  const pendingInputsRef = useRef<Record<number, Partial<Record<PlayerSlot, SignedInputPacket>>>>({});
-  // Canonical (last-advanced) packet hashes per slot, used for on-chain claim heads.
+  const liveRef = useRef<LiveMatch | null>(null);
+  const storeRef = useRef<BrowserEvidenceStore | null>(null);
+  const generationRef = useRef(0);
+  const preparationRef = useRef<symbol | null>(null);
+  const admissionRef = useRef<Promise<void>>(Promise.resolve());
+  const tickInFlightRef = useRef(false);
   const packetHeadsRef = useRef<{ 1: string; 2: string }>({ 1: ZERO32, 2: ZERO32 });
   const frameHeadRef = useRef(ZERO32);
-  // Delay-based netcode bookkeeping: per-frame packet hashes (local + remote) and
-  // the next frame we still owe an input for (kept INPUT_DELAY ahead of the sim).
-  const myHashByFrameRef = useRef<Record<number, string>>({});
-  const oppHashByFrameRef = useRef<Record<number, string>>({});
-  const nextSendFrameRef = useRef(1);
-  const tickInFlightRef = useRef(false);
+  const genesisSessionRef = useRef<ReturnType<typeof createGenesisSession> | null>(null);
+  const escrowRef = useRef<{ config: LiveConfig; record: GenesisRecord } | null>(null);
+  const [authorizationInput, setAuthorizationInput] = useState("");
+  const [liveStatus, setLiveStatus] = useState("practice discovery");
+  const [savedContexts, setSavedContexts] = useState<string[]>([]);
+  const retryRef = useRef(0);
+  function evidenceStore() { return storeRef.current ??= new BrowserEvidenceStore(); }
+  const syncLive = useCallback((live: LiveMatch) => {
+    if (liveRef.current !== live) return;
+    const snapshot = live.snapshot();
+    setLiveStatus(`${snapshot.config.mode}: ${snapshot.status}`);
+    stateRef.current = snapshot.state; setState(snapshot.state);
+    setPackets(snapshot.packets); setCanonicalFrames(snapshot.frames);
+    frameHeadRef.current = snapshot.frameHead; setFinalFrameHash(snapshot.frameHead);
+    for (const slot of [1, 2] as const) packetHeadsRef.current[slot] = snapshot.packets.find(p => p.player === slot && p.frame === snapshot.state.frame)?.hash ?? ZERO32;
+    setIsRunning(snapshot.status === "running");
+  }, []);
 
-  function primeNetcode() {
-    pendingInputsRef.current = {};
-    packetHeadsRef.current = { 1: ZERO32, 2: ZERO32 };
-    frameHeadRef.current = ZERO32;
-    myHashByFrameRef.current = {};
-    oppHashByFrameRef.current = {};
-    nextSendFrameRef.current = 1;
-    advTimesRef.current = [];
-  }
-
-  // Perf instrumentation: game advance rate + crypto op timing.
-  const advTimesRef = useRef<number[]>([]);
-  const signMsRef = useRef(0);
-  const verifyMsRef = useRef(0);
-  const [gameFps, setGameFps] = useState(0);
-  const [perf, setPerf] = useState({ sign: 0, verify: 0 });
+  useEffect(() => { void evidenceStore().contexts().then(setSavedContexts).catch(e => setLastError(String(e))); }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -161,6 +158,10 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (intervalRef.current) window.clearInterval(intervalRef.current);
+      // This is a generation counter, not a DOM ref; invalidate current work on cleanup.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      generationRef.current++;
+      liveRef.current?.close();
       connRef.current?.close?.();
       peerRef.current?.destroy?.();
     };
@@ -202,15 +203,7 @@ export default function App() {
   }
 
   function sendHello(conn = connRef.current) {
-    const currentWallet = walletRef.current;
-    if (!conn?.open || !currentWallet) return;
-    conn.send({
-      type: "HELLO",
-      matchId: matchIdRef.current,
-      fromSlot: localSlotRef.current,
-      walletAddress: currentWallet.address,
-      publicKey: currentWallet.publicKey,
-    } satisfies NetEnvelope);
+    if (conn?.open) conn.send({ type: "CHALLENGE", nonce: challengeRef.current });
   }
 
   const log = useCallback((line: string) => {
@@ -220,6 +213,8 @@ export default function App() {
   async function initPeer(as: "host" | "joiner") {
     try {
       setLastError("");
+      if (liveRef.current || genesisSessionRef.current || preparationRef.current) throw new Error("Reset locally before changing role.");
+      generationRef.current++;
       peerRef.current?.destroy?.();
       connRef.current?.close?.();
 
@@ -229,17 +224,19 @@ export default function App() {
       updateLocalSlot(as === "host" ? 1 : 2);
 
       peer.on("open", (id: string) => {
+        if (peerRef.current !== peer) return;
         setPeerId(id);
         log(`peer open: ${id}`);
       });
 
       peer.on("connection", (conn) => {
-        if (as !== "host") return;
+        if (peerRef.current !== peer || as !== "host" || connRef.current?.open) { conn.close(); return; }
         connRef.current = conn;
         bindConnection(conn, 1);
       });
 
       peer.on("error", (err) => {
+        if (peerRef.current !== peer) return;
         setLastError(String(err));
         log(`peer error: ${String(err)}`);
       });
@@ -249,27 +246,40 @@ export default function App() {
   }
 
   function bindConnection(conn: DataConnection, slotForLocal: PlayerSlot) {
+    const generation = ++generationRef.current;
+    const live = liveRef.current;
+    live?.attach();
+    authenticatedConnRef.current = null;
+    challengeRef.current = makeMatchId();
+    let queued = 0;
+    const current = () => generationRef.current === generation && connRef.current === conn;
     conn.on("open", () => {
-      setIsConnected(true);
-      log(`connection open to ${conn.peer}`);
-
+      if (!current()) return;
       updateLocalSlot(slotForLocal);
       sendHello(conn);
     });
-
     conn.on("data", (raw: unknown) => {
-      void handleNetMessage(raw as NetEnvelope);
+      if (!current()) return;
+      // Bound the wire payload before cloning and expensive cryptography.
+      try { if (JSON.stringify(raw).length > 16000) throw new Error("Message too large"); }
+      catch { return; }
+      if (queued >= 128) return;
+      queued++;
+      const value = structuredClone(raw);
+      admissionRef.current = admissionRef.current.then(async () => {
+        if (!current()) return;
+        await handleNetMessage(value, current);
+      }).catch(e => { if (current()) { setLastError(String(e)); if (liveRef.current) syncLive(liveRef.current); } }).finally(() => { queued--; });
     });
-
     conn.on("close", () => {
-      setIsConnected(false);
-      log("connection closed");
+      if (!current()) return;
+      generationRef.current++;
+      setIsConnected(false); setIsRunning(false);
+      const active = liveRef.current;
+      if (active) { const token = active.attach(); void active.transport(false, token).then(() => syncLive(active)).catch(e => setLastError(String(e))); }
+      log("connection closed; evidence retained");
     });
-
-    conn.on("error", (err) => {
-      setLastError(String(err));
-      log(`connection error: ${String(err)}`);
-    });
+    conn.on("error", (err) => { if (current()) setLastError(String(err)); });
   }
 
   async function connectToHost() {
@@ -278,6 +288,7 @@ export default function App() {
         setLastError("Initialize as joiner first.");
         return;
       }
+      if (connRef.current?.open) throw new Error("Already connected");
       const conn = peerRef.current.connect(remotePeerId.trim());
       connRef.current = conn;
       bindConnection(conn, 2);
@@ -286,174 +297,67 @@ export default function App() {
     }
   }
 
-  const maybeAdvanceFrame = useCallback(async (frame: number) => {
-    const pair = pendingInputsRef.current[frame];
-    if (!pair?.[1] || !pair?.[2]) return;
-    if (frame !== stateRef.current.frame + 1) return;
-
-    const p1Packet = pair[1]!;
-    const p2Packet = pair[2]!;
-
-    packetHeadsRef.current[1] = p1Packet.hash;
-    packetHeadsRef.current[2] = p2Packet.hash;
-
-    const prevFrameHash = frameHeadRef.current;
-    const frameHash = hashFrameFields(
-      matchIdRef.current,
-      frame,
-      p1Packet.inputMask,
-      p2Packet.inputMask,
-      prevFrameHash
-    );
-
-    frameHeadRef.current = frameHash;
-    setFinalFrameHash(frameHash);
-
-    const canonical: CanonicalFrame = {
-      matchId: matchIdRef.current,
-      frame,
-      p1InputMask: p1Packet.inputMask,
-      p2InputMask: p2Packet.inputMask,
-      prevFrameHash,
-      frameHash,
-    };
-
-    const nextState = transition(stateRef.current, p1Packet.inputMask, p2Packet.inputMask);
-
-    delete pendingInputsRef.current[frame];
-    setCanonicalFrames((prev) => [...prev, canonical]);
-    stateRef.current = nextState;
-    setState(nextState);
-    if (nextState.roundOver) setIsRunning(false);
-
-    // Measure real game advance rate over a ~2s sliding window.
-    const now = performance.now();
-    const times = advTimesRef.current;
-    times.push(now);
-    while (times.length && now - times[0] > 2000) times.shift();
-    if (times.length >= 2) {
-      const span = (times[times.length - 1] - times[0]) / 1000;
-      setGameFps(span > 0 ? (times.length - 1) / span : 0);
-    }
-    setPerf({ sign: signMsRef.current, verify: verifyMsRef.current });
-
-    log(`frame ${frame}: canonicalized + advanced`);
-  }, [log]);
-
-  async function handleNetMessage(msg: NetEnvelope) {
-    if (msg.type === "HELLO") {
-      const expectedRemoteSlot: PlayerSlot = localSlotRef.current === 1 ? 2 : 1;
-      if (msg.fromSlot !== expectedRemoteSlot) {
-        log(`rejected HELLO: expected P${expectedRemoteSlot}, got P${msg.fromSlot}`);
-        return;
-      }
-      if (!sessionIdentityMatches(msg.walletAddress, msg.publicKey)) {
-        log("rejected HELLO: session address does not match public key");
-        return;
-      }
-      setRemoteWalletAddress(msg.walletAddress);
-      updateRemoteWalletPubKey(msg.publicKey);
-
-      if (msg.fromSlot === 1) {
-        updateMatchId(msg.matchId);
-        log(`adopted host match context: ${msg.matchId}`);
-      }
-
-      log(`HELLO from P${msg.fromSlot} ${short(msg.walletAddress, 14)}`);
+  async function handleNetMessage(raw: unknown, current: () => boolean) {
+    if (!object(raw) || typeof raw.type !== "string") throw new Error("Invalid envelope");
+    if (raw.type === "CHALLENGE") {
+      if (Object.keys(raw).sort().join() !== "nonce,type" || !hex(raw.nonce, 32)) throw new Error("Invalid discovery challenge");
+      const key = walletRef.current;
+      if (!key) return;
+      const message = await hello(key, matchIdRef.current, localSlotRef.current, raw.nonce);
+      if (current()) connRef.current?.send(message);
       return;
     }
-
-    if (msg.type === "START_MATCH") {
-      updateMatchId(msg.matchId);
-      primeNetcode();
-      setState(initialState());
-      log(`remote started match: ${msg.matchId}`);
-      setIsRunning(true);
+    if (raw.type === "HELLO") {
+      const msg = verifyHello(raw, challengeRef.current);
+      if (!current()) return;
+      if (msg.slot === localSlotRef.current) throw new Error("Wrong discovery slot");
+      const live = liveRef.current;
+      const bound = live?.config ?? escrowRef.current?.config;
+      const pinnedKey = bound ? (msg.slot === 1 ? bound.p1PublicKey : bound.p2PublicKey) : remoteWalletPubKeyRef.current;
+      if (pinnedKey && msg.publicKey !== pinnedKey) throw new Error("Peer identity changed; reset locally for a new match");
+      if (bound && msg.matchId !== bound.matchId) throw new Error("Wrong reconnect genesis");
+      setRemoteWalletAddress(addressFromPublicKey(msg.publicKey)); updateRemoteWalletPubKey(msg.publicKey);
+      if (msg.slot === 1 && !live) updateMatchId(msg.matchId);
+      if (live) {
+        await live.transport(true); if (!current()) return;
+        if (localSlotRef.current === 1) {
+          const ready = await live.consent(); if (!current()) return;
+          connRef.current?.send({ type: "OFFER", config: live.config, ready });
+        } else for (const message of live.retransmit()) connRef.current?.send(message);
+        syncLive(live);
+      }
+      authenticatedConnRef.current = connRef.current;
+      setIsConnected(true);
+      log(`authenticated discovery from P${msg.slot}`);
       return;
     }
-
-    if (msg.type === "RESET_MATCH") {
-      log("remote requested reset");
-      if (!sessionIdentityMatches(msg.walletAddress, msg.publicKey)) {
-        log("rejected reset: session address does not match public key");
-        return;
+    if (authenticatedConnRef.current !== connRef.current) throw new Error("Authenticate discovery first");
+    if (raw.type === "OFFER") {
+      if (preparationRef.current) throw new Error("Finish local match preparation before accepting an offer");
+      if (Object.keys(raw).sort().join() !== "config,ready,type" || localSlotRef.current !== 2 || !walletRef.current || !remoteWalletPubKeyRef.current) throw new Error("Unexpected offer");
+      const config = raw.config as LiveConfig;
+      const context = configHash(config);
+      verifyReady(config, raw.ready, 1);
+      if (config.matchId !== matchIdRef.current || config.p1PublicKey !== remoteWalletPubKeyRef.current || config.p2PublicKey !== walletRef.current.publicKey) throw new Error("Offer identity mismatch");
+      if (config.mode === "escrow" && (!escrowRef.current || configHash(escrowRef.current.config) !== context)) throw new Error("Load authoritative escrow locally first");
+      if (config.mode === "practice" && (escrowRef.current || genesisSessionRef.current)) throw new Error("Cannot downgrade escrow to practice");
+      let live = liveRef.current;
+      if (live && live.context !== context) throw new Error("Cannot replace active genesis");
+      if (!live) {
+        live = await LiveMatch.create(config, evidenceStore(), 2, walletRef.current, escrowRef.current?.record);
+        if (!current()) { live.close(); return; }
+        liveRef.current = live;
       }
-      await resetLocal(false, msg.matchId);
-      setRemoteWalletAddress(msg.walletAddress);
-      updateRemoteWalletPubKey(msg.publicKey);
-      sendHello();
+      await live.receive(raw.ready); if (!current()) return;
+      const ready = await live.consent(); if (!current()) return;
+      connRef.current?.send(ready); syncLive(live);
       return;
     }
-
-    if (msg.type === "INPUT_PACKET") {
-      const rejection = await validateRemotePacket(msg.packet);
-      if (rejection) {
-        log(`frame ${msg.packet.frame}: rejected remote packet: ${rejection}`);
-        return;
-      }
-
-      log(`frame ${msg.packet.frame}: accepted remote packet`);
-      await storeIncomingPacket(msg.packet);
-    }
-  }
-
-  async function validateRemotePacket(packet: SignedInputPacket) {
-    const currentSlot = localSlotRef.current;
-    const currentState = stateRef.current;
-    const expectedRemoteSlot: PlayerSlot = currentSlot === 1 ? 2 : 1;
-
-    if (!isValidV1InputMask(packet.inputMask)) return "invalid v1 input mask";
-    if (packet.player !== expectedRemoteSlot) return `expected P${expectedRemoteSlot}, got P${packet.player}`;
-    if (packet.matchId !== matchIdRef.current) return `wrong match context ${packet.matchId}`;
-    if (packet.frame <= currentState.frame) return `stale frame ${packet.frame}`;
-    if (packet.frame > currentState.frame + INPUT_DELAY + 2) return `future frame ${packet.frame} beyond delay window`;
-    if (remoteWalletPubKeyRef.current && packet.publicKey !== remoteWalletPubKeyRef.current) return "public key changed after HELLO";
-
-    const hash = hashPacketFields(
-      packet.matchId,
-      packet.frame,
-      packet.player,
-      packet.inputMask,
-      packet.prevSelfHash,
-      packet.prevOppHash
-    );
-    if (hash !== packet.hash) return "packet hash does not match canonical payload";
-
-    // Opponent self-chains to their own previous frame (ordered delivery).
-    const expectedSelf = packet.frame > 1 ? oppHashByFrameRef.current[packet.frame - 1] : ZERO32;
-    if (packet.prevSelfHash !== expectedSelf) {
-      return `broken self hash chain for P${packet.player}`;
-    }
-
-    // ...and acknowledges OUR packet from INPUT_DELAY frames ago.
-    const ackFrame = packet.frame - INPUT_DELAY;
-    const expectedOpp = ackFrame >= 1 ? myHashByFrameRef.current[ackFrame] : ZERO32;
-    if (packet.prevOppHash !== expectedOpp) {
-      return `broken opponent ack for P${packet.player}`;
-    }
-
-    const existing = pendingInputsRef.current[packet.frame]?.[packet.player];
-    if (existing && existing.hash !== packet.hash) return "conflicting packet for frame/player";
-
-    const vStart = performance.now();
-    const signatureOk = await verifyPacket(packet);
-    const vDt = performance.now() - vStart;
-    verifyMsRef.current = verifyMsRef.current === 0 ? vDt : verifyMsRef.current * 0.8 + vDt * 0.2;
-    if (!signatureOk) return "signature verification failed";
-
-    return null;
-  }
-
-  function storeIncomingPacket(packet: SignedInputPacket) {
-    const frame = packet.frame;
-    if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
-    pendingInputsRef.current[frame][packet.player] = packet;
-    oppHashByFrameRef.current[frame] = packet.hash;
-
-    setPackets((prev) => [...prev, packet]);
-    // Do NOT advance here: the fixed 30fps tick is the sole clock. Advancing on
-    // every arrival too would double-step the sim (~60fps, ~5s rounds). Incoming
-    // packets simply buffer until the tick consumes them.
+    const live = liveRef.current;
+    if (!live) throw new Error("No admitted live match");
+    const outbound = await live.receive(raw);
+    if (!current()) return;
+    outbound.forEach(message => connRef.current?.send(message)); syncLive(live);
   }
 
   // Symmetric controls: every player uses the same keys for their own fighter
@@ -468,79 +372,25 @@ export default function App() {
     });
   }, []);
 
-  const buildSignedPacket = useCallback(async (frame: number, inputMask: number) => {
-    if (!wallet) throw new Error("Missing wallet");
-
-    const slot = localSlotRef.current;
-    // Self-chain to our own previous frame; acknowledge the opponent's packet
-    // from INPUT_DELAY frames ago (blind-commit window == INPUT_DELAY).
-    const prevSelfHash = frame > 1 ? myHashByFrameRef.current[frame - 1] ?? ZERO32 : ZERO32;
-    const ackFrame = frame - INPUT_DELAY;
-    const prevOppHash = ackFrame >= 1 ? oppHashByFrameRef.current[ackFrame] ?? ZERO32 : ZERO32;
-
-    const hash = hashPacketFields(
-      matchIdRef.current,
-      frame,
-      slot,
-      inputMask,
-      prevSelfHash,
-      prevOppHash
-    );
-
-    const sStart = performance.now();
-    const signature = await signDigest(wallet.privateKey, hash);
-    const sDt = performance.now() - sStart;
-    signMsRef.current = signMsRef.current === 0 ? sDt : signMsRef.current * 0.8 + sDt * 0.2;
-    myHashByFrameRef.current[frame] = hash;
-
-    return {
-      matchId: matchIdRef.current,
-      frame,
-      player: slot,
-      inputMask,
-      prevSelfHash,
-      prevOppHash,
-      publicKey: wallet.publicKey,
-      signature,
-      hash,
-    } satisfies SignedInputPacket;
-  }, [wallet]);
-
   const tick = useCallback(async () => {
     if (tickInFlightRef.current) return;
+    const live = liveRef.current, conn = connRef.current, generation = generationRef.current;
+    if (!live || !conn?.open) return;
     tickInFlightRef.current = true;
-
     try {
-      if (!connRef.current || !wallet || stateRef.current.roundOver) return;
-
-      const slot = localSlotRef.current;
-      // Send our inputs up to INPUT_DELAY frames ahead of the sim, so the
-      // opponent's matching packet has already had time to arrive.
-      const horizon = stateRef.current.frame + INPUT_DELAY;
-      while (nextSendFrameRef.current <= horizon) {
-        const frame = nextSendFrameRef.current;
-        // Can only sign frame F once we hold the opponent packet it acknowledges
-        // (F - INPUT_DELAY). If not yet received, wait (this is the only stall).
-        const ackFrame = frame - INPUT_DELAY;
-        if (ackFrame >= 1 && oppHashByFrameRef.current[ackFrame] === undefined) break;
-
-        const inputMask = currentLocalInputMask();
-        const packet = await buildSignedPacket(frame, inputMask);
-        if (!pendingInputsRef.current[frame]) pendingInputsRef.current[frame] = {};
-        pendingInputsRef.current[frame][slot] = packet;
-        setPackets((prev) => [...prev, packet]);
-        connRef.current.send({ type: "INPUT_PACKET", packet } satisfies NetEnvelope);
-        nextSendFrameRef.current = frame + 1;
+      const outbound = await live.tick(currentLocalInputMask());
+      if (generation !== generationRef.current || liveRef.current !== live || connRef.current !== conn) return;
+      outbound.forEach(message => conn.send(message));
+      if (Date.now() - retryRef.current > 500) {
+        retryRef.current = Date.now();
+        const request = await live.requestMissing();
+        if (generation !== generationRef.current || liveRef.current !== live) return;
+        if (request) conn.send(request);
       }
-
-      // Advance at most one canonical frame per tick for a steady 30fps display.
-      await maybeAdvanceFrame(stateRef.current.frame + 1);
-    } finally {
-      tickInFlightRef.current = false;
-    }
-  }, [buildSignedPacket, currentLocalInputMask, maybeAdvanceFrame, wallet]);
-
-
+      syncLive(live);
+    } catch (error) { if (generation === generationRef.current) { setLastError(String(error)); syncLive(live); } }
+    finally { tickInFlightRef.current = false; }
+  }, [currentLocalInputMask, syncLive]);
 
   useEffect(() => {
     if (!isConnected || !isRunning || state.roundOver) {
@@ -626,42 +476,108 @@ export default function App() {
     setIsReplayPlaying(false);
   }
 
-  async function resetLocal(pushRemote = true, adoptedMatchId?: string) {
+  async function resetLocal() {
+    const generation = ++generationRef.current;
+    preparationRef.current = null;
+    liveRef.current?.close(); liveRef.current = null; escrowRef.current = null; genesisSessionRef.current = null;
+    connRef.current?.close(); connRef.current = null;
+    setIsConnected(false); setIsRunning(false);
     const newWallet = await createSessionWallet();
-    updateWallet(newWallet);
-    setState(initialState());
-    setPackets([]);
-    setCanonicalFrames([]);
-    setLogs([]);
-    setFinalFrameHash(ZERO32);
-    setFinalStateHash("");
-    setRemoteWalletAddress("");
-    updateRemoteWalletPubKey("");
-    setLastError("");
-
-    primeNetcode();
-    setIsRunning(false);
-
-    const nextMatchId = adoptedMatchId ?? makeMatchId();
-    updateMatchId(nextMatchId);
-
-    if (pushRemote && connRef.current?.open) {
-      connRef.current.send({
-        type: "RESET_MATCH",
-        matchId: nextMatchId,
-        fromSlot: localSlotRef.current,
-        walletAddress: newWallet.address,
-        publicKey: newWallet.publicKey,
-      } satisfies NetEnvelope);
-    }
+    if (generation !== generationRef.current) return;
+    updateWallet(newWallet); updateMatchId(makeMatchId());
+    stateRef.current = initialState(); setState(stateRef.current);
+    setPackets([]); setCanonicalFrames([]); setFinalFrameHash(ZERO32); setFinalStateHash("");
+    setRemoteWalletAddress(""); updateRemoteWalletPubKey(""); setLastError(""); setLiveStatus("practice discovery");
+    setSavedContexts(await evidenceStore().contexts());
   }
 
-  function startMatch() {
-    if (!isConnected) return;
-    primeNetcode();
-    setState(initialState());
-    setIsRunning(true);
-    connRef.current?.send({ type: "START_MATCH", matchId: matchIdRef.current } satisfies NetEnvelope);
+  async function startMatch() {
+    const generation = generationRef.current, conn = connRef.current, key = walletRef.current;
+    if (!isConnected || !conn?.open || !key || localSlotRef.current !== 1) return;
+    const preparation = Symbol("match preparation");
+    try {
+      if (preparationRef.current) throw new Error("Match preparation already in progress");
+      preparationRef.current = preparation;
+      if (genesisSessionRef.current && !escrowRef.current) throw new Error("This key adopted an escrow binding; load its activation or reset locally.");
+      const config: LiveConfig = escrowRef.current?.config ?? { version: 1, mode: "practice", matchId: matchIdRef.current, rulesHash: CANONICAL_RULES_HASH, p1PublicKey: key.publicKey, p2PublicKey: remoteWalletPubKeyRef.current };
+      let live = liveRef.current;
+      if (!live) {
+        live = await LiveMatch.create(config, evidenceStore(), 1, key, escrowRef.current?.record);
+        if (generation !== generationRef.current) { live.close(); return; }
+        liveRef.current = live;
+      }
+      const ready = await live.consent();
+      if (generation !== generationRef.current) return;
+      conn.send({ type: "OFFER", config: live.config, ready }); syncLive(live);
+    } catch (error) { if (generation === generationRef.current) setLastError(String(error)); }
+    finally { if (preparationRef.current === preparation) preparationRef.current = null; }
+  }
+
+  async function exportGenesisConsent() {
+    const generation = generationRef.current, key = walletRef.current, signer = mainSignerRef.current;
+    const preparation = Symbol("match preparation");
+    try {
+      if (preparationRef.current) throw new Error("Match preparation already in progress");
+      preparationRef.current = preparation;
+      if (!key || !signer?.provider || liveRef.current) throw new Error("Connect main wallet before signing genesis consent");
+      const chainId = (await signer.provider.getNetwork()).chainId.toString();
+      const record = await readGenesisRecord(signer.provider, { chainId, arena: arenaAddress.trim(), challengeId: onchainChallengeId.trim() });
+      if (generation !== generationRef.current) return;
+      const player = await signer.getAddress();
+      if (generation !== generationRef.current || liveRef.current) return;
+      const session = genesisSessionRef.current ??= createGenesisSession(key, localSlotRef.current, player);
+      const signature = await session.authorize(record);
+      if (generation !== generationRef.current || liveRef.current) return;
+      const consent = { binding: record.binding, slot: localSlotRef.current, publicKey: key.publicKey, signature };
+      const context = `consent:${hashGenesisBinding(record.binding)}:${localSlotRef.current}`;
+      const existing = await evidenceStore().read(context);
+      if (!existing.length) await evidenceStore().initialize(context, { kind: "genesis-consent", consent, lookup: record.lookup });
+      else if (!verifyGenesisConsent(existing[0].consent) || JSON.stringify(existing[0].consent) !== JSON.stringify(consent)) throw new Error("Conflicting saved genesis consent");
+      if (generation !== generationRef.current || liveRef.current) return;
+      downloadText("genesis-consent.json", JSON.stringify(consent, null, 2));
+    } catch (error) { if (generation === generationRef.current) setLastError(String(error)); }
+    finally { if (preparationRef.current === preparation) preparationRef.current = null; }
+  }
+
+  async function loadEscrow() {
+    const generation = generationRef.current;
+    const preparation = Symbol("match preparation");
+    try {
+      if (preparationRef.current) throw new Error("Match preparation already in progress");
+      preparationRef.current = preparation;
+      if (liveRef.current || !walletRef.current || !mainSignerRef.current?.provider) throw new Error("Connect main wallet and discover peer before loading a match");
+      const signer = mainSignerRef.current, provider = signer.provider!;
+      const chainId = (await provider.getNetwork()).chainId.toString();
+      const record = await readGenesisRecord(provider, { chainId, arena: arenaAddress.trim(), challengeId: onchainChallengeId.trim() });
+      if (generation !== generationRef.current || liveRef.current) return;
+      const key = walletRef.current;
+      const authorization = JSON.parse(authorizationInput) as GenesisAuthorization;
+      const player = await signer.getAddress();
+      if (generation !== generationRef.current || liveRef.current) return;
+      const session = genesisSessionRef.current ??= createGenesisSession(key, localSlotRef.current, player);
+      await session.authorize(record); session.activate(authorization, record);
+      if (generation !== generationRef.current || liveRef.current) return;
+      const config: LiveConfig = { version: 1, mode: "escrow", matchId: record.binding.genesis, rulesHash: CANONICAL_RULES_HASH,
+        p1PublicKey: localSlotRef.current === 1 ? key.publicKey : remoteWalletPubKeyRef.current,
+        p2PublicKey: localSlotRef.current === 2 ? key.publicKey : remoteWalletPubKeyRef.current, authorization };
+      configHash(config);
+      escrowRef.current = { config, record }; updateMatchId(config.matchId); setLiveStatus("escrow authorized; ready to start");
+    } catch (error) { if (generation === generationRef.current) setLastError(String(error)); }
+    finally { if (preparationRef.current === preparation) preparationRef.current = null; }
+  }
+
+  async function inspectEvidence(context: string) {
+    try {
+      if (context.startsWith("consent:")) {
+        const events = await evidenceStore().read(context);
+        if (events.length !== 1 || events[0].kind !== "genesis-consent" || !verifyGenesisConsent(events[0].consent)) throw new Error("Invalid saved genesis consent");
+        downloadText("recovered-genesis-consent.json", JSON.stringify(events[0], null, 2));
+        return;
+      }
+      const recovered = await LiveMatch.recover(context, evidenceStore());
+      downloadText(`evidence-${context.slice(2, 10)}.json`, JSON.stringify(recovered.snapshot(), null, 2));
+      log("Recovered verified evidence for inspection; old signing key is unavailable.");
+    } catch (error) { setLastError(String(error)); }
   }
 
   async function connectMainWallet() {
@@ -811,14 +727,13 @@ export default function App() {
       : displayState.winner === "P2"
       ? "P2 wins"
       : displayState.winner === "TIE_BOTH_LOSE"
-      ? "Tie: both lose ante"
+      ? "Draw"
       : "In progress";
 
   const nextFrame = state.frame + 1;
-  const pendingNext = pendingInputsRef.current[nextFrame] ?? {};
-  const localPending = !!pendingNext[localSlot];
+  const localPending = packets.some(p => p.frame === nextFrame && p.player === localSlot);
   const remoteSlot: PlayerSlot = localSlot === 1 ? 2 : 1;
-  const remotePending = !!pendingNext[remoteSlot];
+  const remotePending = packets.some(p => p.frame === nextFrame && p.player === remoteSlot);
   const syncText = state.roundOver
     ? "Round complete"
     : !isRunning
@@ -908,23 +823,22 @@ export default function App() {
               <button
                 style={styles.button}
                 onClick={startMatch}
-                disabled={!isConnected || isRunning}
+                disabled={!isConnected || isRunning || localSlot !== 1 || state.roundOver}
               >
                 Start Match
               </button>
-              <button style={styles.buttonSecondary} onClick={() => void resetLocal(true)}>
+              <button style={styles.buttonSecondary} onClick={() => void resetLocal()}>
                 New Match
               </button>
             </div>
 
             <div style={styles.grid4}>
+              <Stat title="Live mode" value={liveStatus} />
               <Stat title="Match ID" value={short(matchId, 14)} />
               <Stat title="Role / Slot" value={`${role} / P${localSlot}`} />
               <Stat title="Frame" value={`${displayState.frame} / ${ROUND_FRAMES}`} />
               <Stat title="Timer" value={`${(displayState.timerFramesLeft / FPS).toFixed(2)}s`} />
               <Stat title="Sync" value={replayResult ? `Replay ${replayFrame}/${replayResult.states.length - 1}` : syncText} />
-              {devMode && <Stat title="Game FPS" value={gameFps.toFixed(1)} />}
-              {devMode && <Stat title="Crypto ms" value={`sign ${perf.sign.toFixed(1)} · verify ${perf.verify.toFixed(1)}`} />}
             </div>
           </section>
 
@@ -959,6 +873,10 @@ export default function App() {
             <div style={{ color: isConnected ? "#4ade80" : "#f59e0b", fontSize: 14 }}>
               {isConnected ? "Connected" : "Not connected"}
             </div>
+            <div style={styles.sub}>Practice discovery proves session-key possession; it does not authorize escrow.</div>
+            <button style={styles.smallButton} onClick={() => { connRef.current?.close(); }}>Disconnect</button>
+            <button style={styles.smallButton} onClick={() => void evidenceStore().contexts().then(setSavedContexts).catch(e => setLastError(String(e)))}>Refresh saved evidence</button>
+            {savedContexts.map(context => <button key={context} style={styles.smallButton} onClick={() => void inspectEvidence(context)}>Inspect {short(context, 16)}</button>)}
             {lastError ? <div style={styles.error}>{lastError}</div> : null}
           </section>
 
@@ -1212,6 +1130,9 @@ export default function App() {
                 placeholder="Challenge id"
               />
             </div>
+            <textarea aria-label="Genesis authorization" placeholder="Activated genesis authorization JSON" value={authorizationInput} onChange={event => setAuthorizationInput(event.target.value)} />
+            <button style={styles.smallButton} onClick={() => void exportGenesisConsent()}>Export genesis consent</button>
+            <button style={styles.smallButton} onClick={() => void loadEscrow()}>Load activated escrow match</button>
             <div style={styles.row}>
               <input
                 style={styles.input}

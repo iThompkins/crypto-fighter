@@ -2,7 +2,7 @@ import { AbiCoder, Contract, getAddress, getBytes, id, keccak256, recoverAddress
 import { CANONICAL_RULES_HASH } from "./protocol.ts";
 import { INPUT_DELAY, ROUND_FRAMES } from "./game.ts";
 import { isValidV1InputMask } from "./input-mask.ts";
-import { hashPacketFields, signDigest, ZERO32 } from "./crypto.ts";
+import { addressFromPublicKey, hashPacketFields, signDigest, ZERO32 } from "./crypto.ts";
 import type { PlayerSlot, SessionWallet, SignedInputPacket } from "./types.ts";
 
 export type GenesisBinding = {
@@ -10,7 +10,7 @@ export type GenesisBinding = {
   p1: string; p2: string; p1Session: string; p2Session: string; stake: string;
   responseWindow: string; restrictedOpponent: string;
 };
-export type GenesisRecord = { binding: GenesisBinding; authorized: boolean; registrationChallengeId: string };
+export type GenesisRecord = { binding: GenesisBinding; authorized: boolean; registrationChallengeId: string; lookup?: { chainId: string; arena: string; challengeId: string; blockNumber: number } };
 export type GenesisAuthorization = { binding: GenesisBinding; p1Signature: string; p2Signature: string };
 export const GENESIS_BINDING_TAG = id("CryptoFighter.GenesisBinding.v1");
 export const GENESIS_AUTHORIZATION_TAG = id("CryptoFighter.GenesisAuthorization.v1");
@@ -85,7 +85,7 @@ export async function readGenesisRecord(provider: Provider, locator: { chainId: 
   if (binding.chainId !== locator.chainId || binding.challengeId !== locator.challengeId || getAddress(binding.arena) !== getAddress(locator.arena)) throw new Error("unexpected genesis record domain");
   const registrationChallengeId = (await arena.challengeForGenesis(binding.genesis, { blockTag })).toString();
   if (registrationChallengeId !== locator.challengeId) throw new Error("genesis registration mismatch");
-  return { binding, authorized: result.authorized, registrationChallengeId };
+  return { binding, authorized: result.authorized, registrationChallengeId, lookup: { ...locator, blockNumber: blockTag } };
 }
 
 // One ephemeral session adopts one immutable escrow binding. Callers must use a
@@ -127,4 +127,17 @@ export function createGenesisSession(wallet: SessionWallet, slot: PlayerSlot, ex
       return packet;
     },
   };
+}
+
+// Public preparation evidence can be inspected after key loss without granting
+// fresh signing or chain authority.
+export function verifyGenesisConsent(value: unknown): boolean {
+  try {
+    if (!value || typeof value !== "object") return false;
+    const consent = value as { binding: GenesisBinding; slot: PlayerSlot; publicKey: string; signature: string };
+    if (Object.keys(consent).sort().join() !== "binding,publicKey,signature,slot") return false;
+    const expected = consent.slot === 1 ? consent.binding.p1Session : consent.binding.p2Session;
+    return canonicalSigner(genesisAuthorizationDigest(consent.binding, consent.slot), consent.signature) === getAddress(expected) &&
+      getAddress(addressFromPublicKey(consent.publicKey)) === getAddress(expected);
+  } catch { return false; }
 }

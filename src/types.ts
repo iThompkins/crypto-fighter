@@ -83,27 +83,3 @@ export type SessionWallet = {
   // secp256k1 private key as 0x-prefixed hex.
   privateKey: string;
 };
-
-export type NetEnvelope =
-  | {
-      type: "HELLO";
-      matchId: string;
-      fromSlot: PlayerSlot;
-      walletAddress: string;
-      publicKey: string;
-    }
-  | {
-      type: "INPUT_PACKET";
-      packet: SignedInputPacket;
-    }
-  | {
-      type: "START_MATCH";
-      matchId: string;
-    }
-  | {
-      type: "RESET_MATCH";
-      matchId: string;
-      fromSlot: PlayerSlot;
-      walletAddress: string;
-      publicKey: string;
-    };
