@@ -145,9 +145,18 @@ The integration test builds an authorized trace from an actually activated
 Hardhat record and checks genesis/interior/terminal/padded-terminal openings in
 Solidity, including wrong-domain/index/length rejection.
 
-Next: freeze claims and roots in the arena, implement authenticated on-chain
-bisection turns/deadlines, and check the isolated transition with the canonical
-minimal step verifier. Resolving a step must not blindly certify every other
+Claims, roots and midpoint turns/deadlines are now frozen in the arena.
+Next resolve the state-encoding blocker below, then check the isolated
+transition with the canonical minimal step verifier. Resolving a step must not blindly certify every other
 state of a challenger's trace. Availability and result replacement/refund rules
 must be resolved and tested before enabling payouts. Full-transcript on-chain
 replay is not an allowed fallback.
+
+## Updated continuation boundary — 2026-09-17
+
+Arena trace claims and authenticated midpoint turns/deadlines now exist; see
+EXECUTION_TRACE.md. All legacy settlement entries reject matches with a trace
+claim. The remaining single-step verifier is blocked on a reproduced state-codec
+defect: valid canonical gameplay reaches quarter-unit coordinates, which the
+current doubled-integer state encoding rejects. Genesis authorization remains
+unchanged; it does not remedy this representation failure. No settlement is enabled.

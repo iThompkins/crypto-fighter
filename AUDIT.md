@@ -243,3 +243,29 @@ Round IDs prevent replay, and a first response cannot extend the shared clock.
 Legacy result/gameplay-timeout entry points cannot bypass a trace claim.
 No new payout or recovery authority is introduced; local test stakes remain
 locked once a trace claim is created while the remaining machinery is developed.
+
+Validation of the turn increment: lint and 41 contract tests passed. Commit
+`0df363f` records this increment.
+
+## Blocking correction to state-encoding assumption — 2026-09-17
+
+During one-step implementation, independent review disproved the half-unit
+geometry invariant recorded above. Reachable sequence: 85 frames (2,0), 110
+frames (1,0), 55 frames (2,1) produces quarter-unit x positions at frame 250.
+Independent wall clamping is the missing case. The new regression continues
+to a terminal tie with valid signatures/self/ack/frame chains, verifies it
+strictly, and demonstrates rejection by both trace builders. This is a known
+limitation test, not an assertion that rejecting honest traces is acceptable.
+
+The unfinished transition verifier and dependent expiry/classification work
+were removed before commit. No gameplay, state encoding, domain or canonical
+fingerprint was changed. Approval is required for a new exact state encoding/
+version before resuming adjudication. Increasing the scale without establishing
+a sufficient bound is not a repair. Full on-chain replay is still prohibited.
+Browser settlement and real-money deployment remain disabled.
+
+Final validation after removing the unfinished verifier: full
+`CHROMIUM_PATH=/usr/bin/chromium npm run check` passed: lint, build, 58 Node
+checks, 41 contract tests and 2 browser tests. The existing bundle-size warning
+remains. The new geometry regression passes by documenting the codec failure;
+it is not evidence that the failure has been repaired.

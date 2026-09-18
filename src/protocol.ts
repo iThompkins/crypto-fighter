@@ -28,7 +28,8 @@ function integer(value: number): number {
   return value;
 }
 function fighterWords(f: Fighter): number[] {
-  // Signed, doubled geometric values preserve half-unit collision coordinates.
+  // Existing codec preserves half-units only. Reachable quarter-unit geometry
+  // is a known blocker: test/trace-geometry-blocker.test.mjs. Never round it.
   return [f.x * 2, f.y * 2, f.w * 2, f.h * 2, f.hp, f.facing, f.attackCooldown, f.attackActive, f.vy * 2].map(integer);
 }
 export function encodeTraceState(state: GameState): string {

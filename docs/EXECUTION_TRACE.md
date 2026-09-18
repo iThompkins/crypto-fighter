@@ -20,8 +20,10 @@ Genesis registration, one-time session authorization, immutable escrow binding,
 context-authorized trace construction, an off-chain authenticated bisection
 coordinator, and compact Solidity Merkle membership verification are now
 implemented. See [GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md) for exact
-formats, chain authority, lifecycle and tested limits. Live on-chain trace claims,
-bisection turns/deadlines and minimal transition adjudication are still pending.
+formats, chain authority, lifecycle and tested limits. On-chain trace claims
+and bisection turns/deadlines are implemented below.
+Minimal transition adjudication is blocked on the reachable-coordinate encoding
+defect documented under State encoding.
 The sections below preserve the original design and experimental encoding; they
 must not be read as claiming a complete settlement protocol.
 
@@ -110,13 +112,20 @@ active attack duration, vertical velocity. Geometric values and velocity are
 multiplied by two; remaining fields are unscaled. Values must be exact safe
 integers after scaling. No rounding is allowed.
 
-The existing collision midpoint can produce half-unit x coordinates. Both
-fighters start with matching fractional parts; movement changes x by integers,
-collision separation gives both the same fractional part, and stage clamping
-sets both to integers. Thus reachable x values remain multiples of one half.
-Doubled encoding preserves the current rules; it does not change the simulation.
-The future one-step verifier must preserve this exact arithmetic and transition
-order. Serialization is not itself a proof that an arbitrary state is reachable.
+**Known blocker (2026-09-17): this encoding is insufficient for reachable states.**
+Independent movement clamping breaks the previously asserted equal-fraction
+invariant. From genesis, 85 frames of masks (2,0) yield x=(544.5,572.5),
+110 frames of (1,0) yield x=(0,572.5), and 55 frames of (2,1) yield
+x=(272.25,300.25) at frame 250. Fifty idle frames then produce a valid terminal
+tie. Strict signed transcript verification succeeds, but both trace builders
+reject it because doubled quarter coordinates are not integers.
+
+`test/trace-geometry-blocker.test.mjs` preserves the complete authenticated
+reproduction. The single-transition implementation was withdrawn before commit
+because it relied on the false invariant. Do not round these coordinates or
+silently alter collision/clamping behavior. A new exact encoding/version and
+its precision analysis require approval before implementing the verifier.
+Merely changing the scale to four does not establish a general precision bound.
 
 ### Checkpoints, leaves and padding
 
@@ -188,12 +197,12 @@ rebuilt output when importing a claim.
 
 ## Next implementation boundary
 
-The genesis binding and compact move authentication are implemented as described
-in GENESIS_AUTHORIZATION.md. Next introduce claim/dispute storage, on-chain
-authenticated midpoint rounds, a minimal
-Solidity transition verifier with differential tests against the unchanged game,
-and authenticated turn timeouts. This document is not a claim those components
-exist. No full-transcript on-chain replay fallback is permitted.
+The genesis binding, compact move authentication, trace claims and midpoint
+turns/deadlines are implemented. Next resolve the state-encoding blocker above,
+then implement the canonical single-transition verifier, authenticated timeout
+resolution and adversarial end-to-end validation. No full-transcript on-chain
+replay fallback is permitted. Replacement, equivocation, both-invalid and
+non-response payout rules still require explicit decisions before settlement.
 
 ## On-chain turn implementation — 2026-09-17
 

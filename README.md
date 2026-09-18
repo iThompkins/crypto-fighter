@@ -297,9 +297,10 @@ encoding, dispute invariants, availability requirements, and remaining work.
 
 Implemented now: experimental off-chain trace construction from a strictly
 verified terminal transcript, canonical ABI state encoding, ordered Merkle trees,
-and bounded checkpoint membership proofs. Half-unit collision coordinates are
-preserved exactly. Authenticated but unexecuted delayed inputs cannot alter the
-root. Browser and CLI use the same implementation.
+and bounded checkpoint membership proofs. The codec preserves half-units, but
+a reproduced valid wall/recollision history reaches quarter-units and cannot be
+committed. This blocks one-step adjudication; see the execution-trace document.
+Authenticated but unexecuted delayed inputs cannot alter the root. Browser and CLI use the same implementation.
 
 ~~~bash
 npm run make-transcript -- /tmp/terminal.json
