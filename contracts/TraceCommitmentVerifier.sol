@@ -27,7 +27,7 @@ contract TraceCommitmentVerifier {
         uint256 index,
         Checkpoint calldata checkpoint,
         bytes32[] calldata siblings
-    ) external pure returns (bool) {
+    ) public pure returns (bool) {
         if (index > 300 || siblings.length != 9) return false;
         bytes32 current = keccak256(abi.encode(LEAF_TAG, contextHash, index, hashCheckpoint(checkpoint)));
         for (uint256 depth = 0; depth < 9; depth++) {

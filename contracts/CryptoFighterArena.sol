@@ -5,7 +5,9 @@ pragma solidity ^0.8.24;
 /// @dev This intentionally does not replay the whole match on-chain yet.
 ///      Result claims are optimistic and remain experimental until an execution
 ///      proof can distinguish canonical continuation from delayed pre-signed inputs.
-contract CryptoFighterArena {
+import "./TraceDispute.sol";
+
+contract CryptoFighterArena is TraceDispute {
     /// @notice Identifies the sole canonical game version; never match configuration.
     /// @dev Must equal src/protocol.ts. Deployment tests check byte-for-byte parity.
     bytes32 public constant CANONICAL_RULES_HASH =
@@ -376,6 +378,7 @@ contract CryptoFighterArena {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(genesisAuthorized[challengeId], "genesis not authorized");
+        require(traceGames[challengeId].phase == TracePhase.None, "trace claim active");
         require(c.resultClaimant == address(0), "claim already active");
         require(c.timeoutDeadline == 0, "timeout active");
         require(
@@ -403,6 +406,7 @@ contract CryptoFighterArena {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(genesisAuthorized[challengeId], "genesis not authorized");
+        require(traceGames[challengeId].phase == TracePhase.None, "trace claim active");
         require(c.resultClaimant != address(0), "no claim");
         require(block.timestamp > c.resultDeadline, "window open");
 
@@ -421,6 +425,7 @@ contract CryptoFighterArena {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(genesisAuthorized[challengeId], "genesis not authorized");
+        require(traceGames[challengeId].phase == TracePhase.None, "trace claim active");
         require(c.resultClaimant != address(0), "no claim");
         require(block.timestamp <= c.resultDeadline, "window closed");
         require(msg.sender != c.resultClaimant, "claimant cannot dispute");
@@ -493,6 +498,7 @@ contract CryptoFighterArena {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(genesisAuthorized[challengeId], "genesis not authorized");
+        require(traceGames[challengeId].phase == TracePhase.None, "trace claim active");
         require(c.timeoutDeadline == 0, "timeout already active");
         require(frame > 0, "frame required");
         require(transcriptHead != bytes32(0), "transcript head required");
@@ -535,6 +541,7 @@ contract CryptoFighterArena {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(genesisAuthorized[challengeId], "genesis not authorized");
+        require(traceGames[challengeId].phase == TracePhase.None, "trace claim active");
         require(c.timeoutDeadline != 0, "no active timeout");
         require(msg.sender == c.timeoutAccused, "only accused");
         require(block.timestamp <= c.timeoutDeadline, "deadline passed");
@@ -560,6 +567,7 @@ contract CryptoFighterArena {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
         require(genesisAuthorized[challengeId], "genesis not authorized");
+        require(traceGames[challengeId].phase == TracePhase.None, "trace claim active");
         require(c.timeoutDeadline != 0, "no active timeout");
         require(block.timestamp > c.timeoutDeadline, "deadline not passed");
 
@@ -620,6 +628,14 @@ contract CryptoFighterArena {
         }
 
         emit MatchFinalized(challengeId, outcome, winner, pot);
+    }
+
+    function _traceContext(uint256 id) internal view override returns (address, address, bytes32, uint256) {
+        Challenge storage c = challenges[id];
+        require(c.status == MatchStatus.Active, "not active");
+        require(genesisAuthorized[id], "genesis not authorized");
+        require(c.resultClaimant == address(0) && c.timeoutDeadline == 0, "legacy claim active");
+        return (c.p1, c.p2, c.matchContextHash, c.responseWindowSeconds);
     }
 
     function _safeTransfer(address payable to, uint256 amount) internal {

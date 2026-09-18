@@ -315,9 +315,10 @@ v1 packets do not sign the required domain and every output is marked
 
 Now implemented in addition: immutable escrow-bound genesis authorization,
 authorized trace roots, an off-chain authenticated bisection coordinator, and
-compact Solidity Merkle membership verification. Not implemented: on-chain root
-claims, on-chain interactive bisection, one-step adjudication, authenticated
-dispute-turn timeouts, or availability recovery. The existing continuation-packet dispute conflicts with this design and
+compact Solidity Merkle membership verification. On-chain root claims and interactive bisection turns/deadlines are also implemented
+(see the execution-trace document). One-step adjudication, authenticated timeout
+resolution and availability recovery remain pending. Trace claims block all legacy
+settlement paths and currently have no payout/recovery entry point. The existing continuation-packet dispute conflicts with this design and
 must eventually be replaced. No full-transcript on-chain replay fallback is planned.
 
 ## Safety limitations

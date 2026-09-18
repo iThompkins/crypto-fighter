@@ -194,3 +194,25 @@ authenticated midpoint rounds, a minimal
 Solidity transition verifier with differential tests against the unchanged game,
 and authenticated turn timeouts. This document is not a claim those components
 exist. No full-transcript on-chain replay fallback is permitted.
+
+## On-chain turn implementation — 2026-09-17
+
+`TraceDispute`, inherited by the arena, now accepts `claimTrace` only from an
+activated escrow participant with no legacy claim/timeout. It fixes the root and
+binding context, proves the canonical genesis and index-300 endpoint, and binds
+terminal frame/outcome to the revealed ABI state. Terminal execution and absorbing
+normalization remain optimistic. There is deliberately no trace payout entry point.
+
+Only the opponent may `challengeTrace`, through the inclusive claim deadline,
+with another fixed root, the same canonical genesis, and an unequal endpoint.
+Both participants owe `revealMidpoint` at the selected floor((low+high)/2), in
+either order, under one shared deadline. Explicit round numbers prevent stale
+transaction replay. Invalid/duplicate/late responses cannot alter the clock or
+bracket. Both valid responses advance equal(low)/unequal(high); adjacency stops
+midpoint turns after at most nine rounds. Events and `getTraceGame` expose roots,
+responders, bracket, round and deadline. All legacy settlement/timeout entries
+reject a match once any trace claim exists, including an expired trace claim.
+
+This stage intentionally locks local test deposits pending adjudication/recovery;
+it is not a usable escrow lifecycle. Trace claims never transfer funds. Browser
+settlement and real-money deployment remain disabled.

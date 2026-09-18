@@ -232,3 +232,14 @@ transfers. Neither problem is claimed solved. On-chain claims/bisection turns,
 minimal transition adjudication, dispute deadlines and complete recovery remain
 next. The legacy optimistic/continuation payout code remains an unsafe local-only
 sketch; real-money/browser settlement stays disabled.
+
+## On-chain trace turns — 2026-09-17
+
+Verified the clean checkpoint at `58474a4`. Added arena-bound trace claims,
+canonical genesis and terminal endpoint openings, opponent counter-commitments,
+and authenticated midpoint rounds. Roots/context remain fixed. Both openings
+are required before changing equal(low)/unequal(high); nine rounds suffice.
+Round IDs prevent replay, and a first response cannot extend the shared clock.
+Legacy result/gameplay-timeout entry points cannot bypass a trace claim.
+No new payout or recovery authority is introduced; local test stakes remain
+locked once a trace claim is created while the remaining machinery is developed.
