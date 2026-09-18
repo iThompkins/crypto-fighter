@@ -1,4 +1,9 @@
-# Reachable horizontal numeric domain
+# Historical binary64 horizontal numeric domain
+
+This analysis describes the retired development simulator at 32079a3, now frozen
+only in `test/fixtures/legacy-binary64.mjs`. Current gameplay uses
+[fixed-point protocol v2](FIXED_POINT_PROTOCOL.md); 2^-48 encoding and binary64
+emulation are not implemented or required.
 
 Analysis of the unchanged `src/game.ts` transition, 2026-09-17. No gameplay,
 trace serialization, hash domain, canonical fingerprint or settlement behavior

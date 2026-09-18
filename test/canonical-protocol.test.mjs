@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { CANONICAL_PROTOCOL_VERSION, CANONICAL_RULES_HASH, CANONICAL_V1_RULES } from "../src/protocol.ts";
+import { CANONICAL_PROTOCOL_VERSION, CANONICAL_RULES_HASH, CANONICAL_RULES } from "../src/protocol.ts";
 import { makeMatchId, hashPacketFields, ZERO32 } from "../src/crypto.ts";
 
-test("canonical fingerprint matches the contract and fixed v1 metadata", async () => {
-  assert.equal(CANONICAL_PROTOCOL_VERSION, 1);
-  assert.equal(CANONICAL_RULES_HASH, "0x1ae89ee81810335d8b8b2ee8d7e9237fef05704a9fae836f3e748fcafdca65cc");
+test("canonical fingerprint matches the contract and fixed v2 metadata", async () => {
+  assert.equal(CANONICAL_PROTOCOL_VERSION, 2);
+  assert.equal(CANONICAL_RULES_HASH, "0x45e7b6011925954ee1b15160173864f8deea010e005bd0c4dfca5fbc1d503a18");
   const contract = await readFile(new URL("../contracts/CryptoFighterArena.sol", import.meta.url), "utf8");
   assert.match(contract, new RegExp(`CANONICAL_RULES_HASH\\s*=\\s*${CANONICAL_RULES_HASH}`));
-  assert.ok(Object.isFrozen(CANONICAL_V1_RULES));
-  assert.throws(() => { CANONICAL_V1_RULES.maxHp = 100; }, TypeError);
+  assert.ok(Object.isFrozen(CANONICAL_RULES));
+  assert.throws(() => { CANONICAL_RULES.maxHp = 100; }, TypeError);
 });
 
 test("live genesis identifiers are fresh and seed distinct first-move chains", () => {

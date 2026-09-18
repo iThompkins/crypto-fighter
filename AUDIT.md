@@ -295,3 +295,57 @@ Validation: lint and all 63 Node tests pass. New bounded searches checked 154,83
 reachable motion transitions; seeded properties checked 18,790 transitions across
 64 full matches, in addition to 2,560 mask-pair cases and the exact witness.
 Independent read-only review confirmed the proof and rounding oracle.
+
+## Phase A — canonical fixed-point v2, 2026-09-17
+
+Approved migration replaces development binary64 physics with SCALE=256 integer
+geometry. Compared floor, nearest/ties-up and nearest/ties-even midpoint rules;
+selected ties-even for exact stage-reflection symmetry without rounding residue
+state or a directional tie preference. The existing equal-x P1-left body ordering
+is explicitly retained. See docs/FIXED_POINT_PROTOCOL.md for the numeric contract,
+proof of midpoint symmetry, bounds, ABI layout and behavior characterization.
+
+All positions/vertical velocity and geometry constants use simulation units.
+Fighter dimensions are rules constants, no longer mutable state. Rendering converts
+at the DOM boundary. Transcript v2 requires the new rules fingerprint and uses the
+same canonical ABI state hash as traces. The generator now imports the production
+simulation. Old replay versions/fingerprints are rejected; the old simulator lives
+only in a test fixture for historical analysis and behavior comparison.
+
+Existing contract state tuples/genesis constants, trace domain tags, and canonical
+fingerprint were migrated for format consistency. No transition adjudication,
+resolution, recovery, or payout entry point was added. Browser/deployment
+containment is unchanged. Test-only Solidity rounding code is compiled in memory
+and is not part of the escrow or any one-step verifier.
+
+Validation: full `CHROMIUM_PATH=/usr/bin/chromium npm run check` passed: lint,
+73 Node tests, production build, 43 local contract tests, and two real-browser
+tests. The existing bundle-size warning remains. New coverage includes all 368641
+midpoint numerators, mirrored mask-pair scenarios, independent BigInt simulation
+and manual ABI encoding, 13 golden transition vectors, Solidity codec/rounding
+parity, strict v1 rejection, the formerly unencodable authenticated transcript,
+and actual DOM geometry conversion. No production gas saving was measured.
+
+Old/new characterization over 128 seeded/random-plus-wall-stress matches compared
+31907 transitions while both pre-states were active, with a sampled maximum x
+error of 1/512 game unit. Three wall-stress cases changed terminal frame or winner
+(two timing changes, one winner change) because strict hit-boundary results changed.
+Ordinary movement/jump/approach-attack scenarios matched after unit conversion.
+These are sample results, not a universal outcome/error guarantee or a human
+playtest claim. Phase A is complete; Phase B and later remain pending.
+
+
+### Phase A exit revalidation — 2026-09-18
+
+Reviewed all 33 changed/new files against the fixed-point/protocol-v2 scope.
+Contract edits migrate only the fingerprint, state tuple, genesis constants and
+hash domains; no Phase B lifecycle/input implementation or later adjudication,
+recovery or payout authority is introduced. Corrected the next-step wording in
+the trace/genesis documentation: Phase B authenticated match/input work precedes
+single-transition adjudication, regardless of existing bisection infrastructure.
+
+Full `CHROMIUM_PATH=/usr/bin/chromium npm run check` passed again: lint, 73 Node
+tests, build, 43 contract tests and both browser tests. The initial sandbox run
+failed on Node subprocess EPERM; the outside-sandbox rerun passed in full. The
+existing bundle-size warning remains. Settlement/deployment containment is
+unchanged. Phase A is ready for its local checkpoint; Phase B remains pending.

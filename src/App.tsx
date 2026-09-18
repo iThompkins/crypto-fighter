@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Peer, { type DataConnection } from "peerjs";
-import { addressFromPublicKey, createSessionWallet, hashFrameFields, hashJson, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
-import { encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, INPUT_DELAY, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
+import { addressFromPublicKey, createSessionWallet, hashFrameFields, hashPacketFields, makeMatchId, signDigest, verifyPacket, ZERO32 } from "./crypto";
+import { toDisplayUnits, FIGHTER_W, FIGHTER_H, encodeInputMask, FLOOR_Y, FPS, getAttackRect, HEIGHT, initialState, INPUT_DELAY, MAX_HP, ROUND_FRAMES, transition, WIDTH } from "./game";
 import { short } from "./format";
 import { arena, connectWallet, outcomeFromWinner, CANONICAL_RULES_HASH, stakeWei } from "./chain";
 import type { Signer } from "ethers";
 import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
-import { CANONICAL_V1_RULES } from "./protocol.ts";
+import { CANONICAL_RULES, hashTraceState } from "./protocol.ts";
 import { isValidV1InputMask } from "./input-mask";
 import type { CanonicalFrame, GameState, MatchTranscript, NetEnvelope, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
@@ -173,7 +173,7 @@ export default function App() {
     if (!el) return;
     const update = () => {
       const w = el.clientWidth;
-      if (w > 0) setArenaScale(Math.min(1.7, Math.max(0.4, w / WIDTH)));
+      if (w > 0) setArenaScale(Math.min(1.7, Math.max(0.4, w / toDisplayUnits(WIDTH))));
     };
     update();
     const ro = new ResizeObserver(update);
@@ -568,7 +568,7 @@ export default function App() {
 
     let cancelled = false;
     void (async () => {
-      const stateHash = hashJson(state);
+      const stateHash = hashTraceState(state);
       if (!cancelled) setFinalStateHash(stateHash);
     })();
 
@@ -838,16 +838,16 @@ export default function App() {
     const uniquePackets = [...byKey.values()].sort((a, b) => a.frame - b.frame || a.player - b.player);
     const p1Local = localSlot === 1;
     return {
-      version: 1,
+      version: 2, rulesHash: CANONICAL_RULES_HASH,
       matchId,
-      rules: CANONICAL_V1_RULES,
+      rules: CANONICAL_RULES,
       players: {
         p1: { slot: 1, address: p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
         p2: { slot: 2, address: !p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: !p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
       },
       packets: uniquePackets,
       canonicalFrames,
-      final: { frame: state.frame, frameHash: finalFrameHash, stateHash: hashJson(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver },
+      final: { frame: state.frame, frameHash: finalFrameHash, stateHash: hashTraceState(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver },
     };
   }, [packets, canonicalFrames, localSlot, matchId, wallet?.address, wallet?.publicKey, remoteWalletAddress, remoteWalletPubKey, finalFrameHash, state]);
 
@@ -990,48 +990,48 @@ export default function App() {
               </div>
             ) : null}
             <div ref={arenaWrapRef} style={{ width: "100%" }}>
-              <div aria-label="Game arena" style={{ ...styles.arena, width: WIDTH * arenaScale, height: HEIGHT * arenaScale, margin: "0 auto" }}>
-              <div style={{ ...styles.floor, top: FLOOR_Y * arenaScale }} />
+              <div aria-label="Game arena" style={{ ...styles.arena, width: toDisplayUnits(WIDTH) * arenaScale, height: toDisplayUnits(HEIGHT) * arenaScale, margin: "0 auto" }}>
+              <div style={{ ...styles.floor, top: toDisplayUnits(FLOOR_Y) * arenaScale }} />
               <div
                 aria-label="Player 1 fighter"
                 style={{
                   ...styles.p1,
-                  left: displayState.p1.x * arenaScale,
-                  top: displayState.p1.y * arenaScale,
-                  width: displayState.p1.w * arenaScale,
-                  height: displayState.p1.h * arenaScale,
+                  left: toDisplayUnits(displayState.p1.x) * arenaScale,
+                  top: toDisplayUnits(displayState.p1.y) * arenaScale,
+                  width: toDisplayUnits(FIGHTER_W) * arenaScale,
+                  height: toDisplayUnits(FIGHTER_H) * arenaScale,
                 }}
               />
               <div
                 aria-label="Player 2 fighter"
                 style={{
                   ...styles.p2,
-                  left: displayState.p2.x * arenaScale,
-                  top: displayState.p2.y * arenaScale,
-                  width: displayState.p2.w * arenaScale,
-                  height: displayState.p2.h * arenaScale,
+                  left: toDisplayUnits(displayState.p2.x) * arenaScale,
+                  top: toDisplayUnits(displayState.p2.y) * arenaScale,
+                  width: toDisplayUnits(FIGHTER_W) * arenaScale,
+                  height: toDisplayUnits(FIGHTER_H) * arenaScale,
                 }}
               />
 
               {p1AttackRect && (
-                <div
+                <div aria-label="Player 1 attack"
                   style={{
                     ...styles.p1Attack,
-                    left: p1AttackRect.x * arenaScale,
-                    top: p1AttackRect.y * arenaScale,
-                    width: p1AttackRect.w * arenaScale,
-                    height: p1AttackRect.h * arenaScale,
+                    left: toDisplayUnits(p1AttackRect.x) * arenaScale,
+                    top: toDisplayUnits(p1AttackRect.y) * arenaScale,
+                    width: toDisplayUnits(p1AttackRect.w) * arenaScale,
+                    height: toDisplayUnits(p1AttackRect.h) * arenaScale,
                   }}
                 />
               )}
               {p2AttackRect && (
-                <div
+                <div aria-label="Player 2 attack"
                   style={{
                     ...styles.p2Attack,
-                    left: p2AttackRect.x * arenaScale,
-                    top: p2AttackRect.y * arenaScale,
-                    width: p2AttackRect.w * arenaScale,
-                    height: p2AttackRect.h * arenaScale,
+                    left: toDisplayUnits(p2AttackRect.x) * arenaScale,
+                    top: toDisplayUnits(p2AttackRect.y) * arenaScale,
+                    width: toDisplayUnits(p2AttackRect.w) * arenaScale,
+                    height: toDisplayUnits(p2AttackRect.h) * arenaScale,
                   }}
                 />
               )}
@@ -1492,8 +1492,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   arena: {
     position: "relative",
-    width: WIDTH,
-    height: HEIGHT,
+    width: toDisplayUnits(WIDTH),
+    height: toDisplayUnits(HEIGHT),
     margin: "0 auto",
     border: "1px solid #27272a",
     borderRadius: 16,

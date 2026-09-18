@@ -6,6 +6,15 @@ Crypto Fighter is a React/TypeScript experiment in deterministic two-player figh
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
+## Fixed-point protocol v2
+
+Phase A uses SCALE=256 integer geometry and nearest-midpoint rounding with ties
+to even. Transcript v2 requires the canonical rules fingerprint; final-state and
+trace hashes share one ABI codec. Development v1 replays are intentionally
+unsupported. See [the numeric specification and behavioral comparison](docs/FIXED_POINT_PROTOCOL.md).
+Existing trace formats/codecs are migrated, but one-step adjudication and trace
+payout/recovery remain unimplemented. Settlement stays disabled.
+
 ## Player flow
 
 1. Page load creates an ephemeral secp256k1 session wallet in browser memory, separate from any injected main wallet.
@@ -54,7 +63,7 @@ type GameState = {
 };
 
 type Fighter = {
-  x: number; y: number; w: number; h: number; hp: number;
+  x: number; y: number; hp: number; // x/y/vy are integer simulation units
   facing: 1 | -1;
   attackCooldown: number;
   attackActive: number;
@@ -62,7 +71,7 @@ type Fighter = {
 };
 ~~~
 
-Current constants are a 720×360 stage, floor Y=260, 30 target FPS, 300 frames/10 seconds, 28×56 fighters, 5 units/frame movement, jump velocity 22, gravity 2, 7 maximum HP, and 1 damage per overlapping active-attack frame.
+Displayed gameplay constants are a 720×360 stage, floor Y=260, 30 target FPS, 300 frames/10 seconds, 28×56 fighters, 5 units/frame movement, jump velocity 22, gravity 2, 7 maximum HP, and 1 damage per overlapping active-attack frame.
 
 Transition order is:
 
@@ -81,7 +90,7 @@ Transition order is:
 [App.tsx](src/App.tsx) uses React DOM elements, not canvas:
 
 - a scaled floor line on a fixed-coordinate arena;
-- one rectangular body per fighter using cumulative x, y, w, and h;
+- one rectangular body per fighter using cumulative x/y and compiled dimensions, converted from simulation units;
 - an attack rectangle while getAttackRect returns one;
 - HP bars/numbers, timerFramesLeft / 30, frame, outcome, sync status, and session identities;
 - an end banner after roundOver; and
@@ -100,9 +109,9 @@ CSS scaling does not enter simulation or hashing. A loaded replay draws its sele
 | 2 | 4 | attack |
 | 3 | 8 | up/jump |
 
-Transcript v1 permits exactly the unsigned integer values 0 through 15. Every combination of the four known bits is valid, including left+right; higher bits are invalid rather than ignored. Browser/runtime code applies `typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 0x0f` without coercing, rounding, truncating, clamping, or masking a value into range.
+The unchanged input-mask v1 protocol permits exactly the unsigned integer values 0 through 15. Every combination of the four known bits is valid, including left+right; higher bits are invalid rather than ignored. Browser/runtime code applies `typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 0x0f` without coercing, rounding, truncating, clamping, or masking a value into range.
 
-JSON validation is over parsed JavaScript binary64 values. A source number is therefore accepted when its parsed value is a safe integer in 0..15, regardless of spelling or pre-conversion rounding/underflow; for example, `1e-400` parses as zero and is accepted, while `1e400` parses as infinity and is rejected. Lexical JSON canonicalization is outside v1.
+JSON validation is over parsed JavaScript binary64 values. A source number is therefore accepted when its parsed value is a safe integer in 0..15, regardless of spelling or pre-conversion rounding/underflow; for example, `1e-400` parses as zero and is accepted, while `1e400` parses as infinity and is rejected. Lexical JSON canonicalization is outside the input-mask protocol.
 
 ### SignedInputPacket
 
@@ -146,11 +155,12 @@ frameHash = keccak256(abi.encode(
 
 The frame chain starts at bytes32 zero and commits ordered paired inputs, not GameState.
 
-### MatchTranscript version 1
+### MatchTranscript version 2
 
 ~~~ts
 type MatchTranscript = {
-  version: 1;
+  version: 2;
+  rulesHash: string;
   matchId: string;
   rules: {
     fps: number; roundFrames: number; maxHp: number;
@@ -172,7 +182,7 @@ type MatchTranscript = {
 };
 ~~~
 
-stateHash is keccak256 of UTF-8 JSON.stringify(finalGameState) and is off-chain only. oneOutstandingPacket remains true in version 1 even though netcode uses inputDelay 2; the legacy field is not a precise buffering-window statement.
+stateHash is Keccak-256 of the canonical v2 ABI state encoding, also used by traces. oneOutstandingPacket remains descriptive legacy metadata even though netcode uses inputDelay 2; it is not a precise buffering-window statement.
 
 ## Lockstep and input delay
 
@@ -204,7 +214,7 @@ loader. There is no separate CLI rules implementation. The CLI therefore needs
 the repository source and installed TypeScript dependency.
 
 Strict verification requires bounded arrays, contiguous canonical frames from
-frame 1, a complete final record including its state hash, exact declared v1
+frame 1, a complete final record including its state hash, the v2 fingerprint and exact declared
 rules, valid distinct curve-point identities, and authenticated packets for every
 executed frame. Every supplied delayed packet is also checked for signature,
 identity, self chain and F-2 acknowledgement. Tail packets are bounded to the
@@ -223,9 +233,8 @@ npm run verify-match -- path/to/prefix.json --allow-partial
 
 The browser offers the same opt-in checkbox. An internally valid nonterminal
 prefix can then return `ok: true`, but always `complete: false`. Default strict
-verification requires a terminal history. Every v1 result, including complete
-terminal replay, reports `settlementEligible: false`: signatures still do not bind
-rules/version and escrow context, and the contract does not verify execution.
+verification requires a terminal history. Every bare transcript result, including complete
+terminal replay, reports `settlementEligible: false`: a bare transcript does not establish authoritative genesis activation, and the contract does not verify execution.
 This change does not authorize payouts or claim on-chain meaning for stateHash.
 
 ## Main wallets and session keys
@@ -296,10 +305,9 @@ The prior README proposal is preserved and developed in
 encoding, dispute invariants, availability requirements, and remaining work.
 
 Implemented now: experimental off-chain trace construction from a strictly
-verified terminal transcript, canonical ABI state encoding, ordered Merkle trees,
-and bounded checkpoint membership proofs. The codec preserves half-units, but
-a reproduced valid wall/recollision history reaches quarter-units and cannot be
-committed. This blocks one-step adjudication; see the execution-trace document.
+verified terminal transcript, canonical ABI integer-state encoding, ordered Merkle trees,
+and bounded checkpoint membership proofs. Phase A fixed-point migration resolves
+the former quarter-unit encoding blocker. One-step adjudication is still pending.
 Authenticated but unexecuted delayed inputs cannot alter the root. Browser and CLI use the same implementation.
 
 ~~~bash
@@ -311,7 +319,7 @@ npm run verify-trace -- /tmp/terminal.json /tmp/commitment.json
 The output includes the root, experimental off-chain context, complete numeric
 rules/genesis hash with semantic revision, terminal metadata, and a nine-sibling
 opening for the selected checkpoint. These are **not escrow-authorized roots**:
-v1 packets do not sign the required domain and every output is marked
+the diagnostic CLI does not establish authoritative genesis activation and every output is marked
 `settlementEligible: false`.
 
 Now implemented in addition: immutable escrow-bound genesis authorization,

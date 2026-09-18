@@ -11,7 +11,7 @@ contract CryptoFighterArena is TraceDispute {
     /// @notice Identifies the sole canonical game version; never match configuration.
     /// @dev Must equal src/protocol.ts. Deployment tests check byte-for-byte parity.
     bytes32 public constant CANONICAL_RULES_HASH =
-        0x1ae89ee81810335d8b8b2ee8d7e9237fef05704a9fae836f3e748fcafdca65cc;
+        0x45e7b6011925954ee1b15160173864f8deea010e005bd0c4dfca5fbc1d503a18;
     /// @dev Temporary containment, not a settlement security proof. No override.
     ///      This prototype must only be exercised with valueless local test funds.
     constructor() {

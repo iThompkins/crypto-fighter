@@ -1,3 +1,4 @@
+import { STATE_ABI_TYPES } from "../src/protocol.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
@@ -6,7 +7,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { AbiCoder } from "ethers";
 import { buildExecutionTrace, encodeTraceState, hashTraceState, openTrace, verifyTraceOpening, verifyExecutionTraceCommitment, TRACE_DEPTH } from "../src/execution-trace.ts";
-import { initialState } from "../src/game.ts";
+import { initialState, SCALE, transition } from "../src/game.ts";
 import { hashPacketFields, signDigest } from "../src/crypto.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "crypto-fighter-trace-"));
@@ -53,19 +54,18 @@ test("proofs reject altered checkpoint, position, branch order, depth, context a
   assert.equal(verifyTraceOpening(trace.root, trace.contextHash, null), false);
 });
 
-test("canonical state encoding fixes field order and preserves half-units and signed velocity", () => {
-  const state = initialState();
-  state.p1.x = 120.5;
-  state.p1.vy = -22;
+test("canonical state encoding fixes field order and preserves simulation integers and signed velocity", () => {
+  const state = transition(initialState(), 8, 0);
+  state.p1.x = 120.5 * SCALE;
   const words = AbiCoder.defaultAbiCoder().decode(
-    ["bytes32", "uint256", "uint256", "bool", "uint8", "int256[9]", "int256[9]"], encodeTraceState(state),
+    STATE_ABI_TYPES, encodeTraceState(state),
   );
-  assert.equal(words[5][0], 241n);
-  assert.equal(words[5][8], -44n);
+  assert.equal(words[5][0], 30848n);
+  assert.equal(words[5][2], -5120n);
   const reordered = { p2: state.p2, p1: state.p1, winner: state.winner, roundOver: state.roundOver, timerFramesLeft: state.timerFramesLeft, frame: state.frame };
   assert.equal(hashTraceState(reordered), hashTraceState(state));
   state.p1.x = 120.25;
-  assert.throws(() => hashTraceState(state), /exact safe integers/);
+  assert.throws(() => hashTraceState(state), /bounded canonical integers/);
 });
 
 test("commitment creation rejects partial, missing, false and post-terminal histories", async () => {

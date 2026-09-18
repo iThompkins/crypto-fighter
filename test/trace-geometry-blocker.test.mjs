@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initialState, transition } from "../src/game.ts";
-import { CANONICAL_V1_RULES, hashTraceState } from "../src/protocol.ts";
-import { hashFrameFields, hashJson, hashPacketFields, ZERO32 } from "../src/crypto.ts";
+import { initialState, transition, SCALE } from "../src/game.ts";
+import { CANONICAL_RULES, CANONICAL_RULES_HASH, hashTraceState } from "../src/protocol.ts";
+import { hashFrameFields, hashPacketFields, ZERO32 } from "../src/crypto.ts";
 import { buildExecutionTrace, buildAuthorizedExecutionTrace } from "../src/execution-trace.ts";
 import { verifyTranscript } from "../src/verifier.ts";
 import { w1, w2, binding, auth, record } from "./fixtures/genesis.mjs";
 
-// Known protocol blocker, not desired codec behavior. Once the replacement
-// encoding is approved this test must require successful exact commitments.
-test("valid collision-wall-recollision history exceeds the current half-unit trace encoding", async () => {
+// Former codec blocker: an honest wall/recollision transcript is now encodable.
+test("valid collision-wall-recollision history is exactly committed by the fixed-point codec", async () => {
   let state = initialState(), frameHead = ZERO32;
   const packets = [], canonicalFrames = [], history = [[], []];
   const positions = new Map();
@@ -32,20 +31,20 @@ test("valid collision-wall-recollision history exceeds the current half-unit tra
     state = transition(state, ...masks);
     if ([85, 195, 250].includes(frame)) positions.set(frame, [state.p1.x, state.p2.x]);
   }
-  assert.deepEqual(positions.get(85), [544.5, 572.5]);
-  assert.deepEqual(positions.get(195), [0, 572.5]);
-  assert.deepEqual(positions.get(250), [272.25, 300.25]);
+  assert.deepEqual(positions.get(85), [544.5 * SCALE, 572.5 * SCALE]);
+  assert.deepEqual(positions.get(195), [0, 572.5 * SCALE]);
+  assert.deepEqual(positions.get(250), [272.25 * SCALE, 300.25 * SCALE]);
   assert.equal(state.winner, "TIE_BOTH_LOSE");
   const transcript = {
-    version: 1, matchId: binding.genesis, rules: CANONICAL_V1_RULES,
+    version: 2, rulesHash: CANONICAL_RULES_HASH, matchId: binding.genesis, rules: CANONICAL_RULES,
     players: { p1: { slot: 1, address: w1.address, publicKey: w1.signingKey.publicKey }, p2: { slot: 2, address: w2.address, publicKey: w2.signingKey.publicKey } },
     packets, canonicalFrames,
-    final: { frame: 300, frameHash: frameHead, stateHash: hashJson(state), p1Hp: 7, p2Hp: 7, winner: state.winner, roundOver: true },
+    final: { frame: 300, frameHash: frameHead, stateHash: hashTraceState(state), p1Hp: 7, p2Hp: 7, winner: state.winner, roundOver: true },
   };
   const verified = await verifyTranscript(transcript);
   assert.equal(verified.ok, true, verified.errors.join("; "));
   assert.equal(verified.complete, true);
-  assert.throws(() => hashTraceState(state), /exact safe integers/);
-  await assert.rejects(buildExecutionTrace(transcript), /exact safe integers/);
-  await assert.rejects(buildAuthorizedExecutionTrace(transcript, auth, record), /exact safe integers/);
+  assert.equal(hashTraceState(state), verified.replay.stateHash);
+  assert.equal((await buildExecutionTrace(transcript)).terminalStateHash, verified.replay.stateHash);
+  assert.equal((await buildAuthorizedExecutionTrace(transcript, auth, record)).terminalStateHash, verified.replay.stateHash);
 });

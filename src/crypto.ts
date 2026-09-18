@@ -104,11 +104,6 @@ export function hashFrameFields(
   ]);
 }
 
-// Off-chain only: fingerprint of a JSON-serializable value (final state hash).
-export function hashJson(value: unknown): string {
-  return keccakHex(new TextEncoder().encode(JSON.stringify(value)));
-}
-
 // Fresh 256-bit random genesis identifier for each live match (UUID-like nonce).
 // Every move digest includes it; zero previous hashes are only chain sentinels.
 // Escrow-domain authentication of this identifier is a separate protocol step.

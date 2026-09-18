@@ -116,9 +116,8 @@ and browser/Node cryptography tests. No session keys are persisted or recovered.
 
 `buildAuthorizedExecutionTrace(transcript, authorization, authoritativeRecord)`
 verifies activation, both signatures, registered genesis, session identities and
-a complete terminal transcript. It constructs `genesis-authorized-trace-v1`
-using `bindingHash` as its Merkle context. The checkpoint/leaf codec is unchanged
-from the experimental trace primitives; roots differ because their context does.
+a complete terminal transcript. It constructs `genesis-authorized-trace-v2`
+using `bindingHash` as its Merkle context. The checkpoint/leaf structure is unchanged; Phase A uses v2 hash domains and integer state encoding. Authorized and diagnostic roots also differ because their context does.
 An old diagnostic root cannot be promoted by relabeling metadata.
 
 `verifyAuthorizedExecutionTraceCommitment` rebuilds the authorized root and checks
@@ -146,8 +145,10 @@ Hardhat record and checks genesis/interior/terminal/padded-terminal openings in
 Solidity, including wrong-domain/index/length rejection.
 
 Claims, roots and midpoint turns/deadlines are now frozen in the arena.
-Next resolve the state-encoding blocker below, then check the isolated
-transition with the canonical minimal step verifier. Resolving a step must not blindly certify every other
+Phase A resolves the former numeric encoding blocker. Phase B must next integrate
+authorized browser matches, authenticated lifecycle/input chains and durable
+evidence. Checking the isolated transition with a canonical minimal step verifier
+belongs to a later phase. Resolving a step must not blindly certify every other
 state of a challenger's trace. Availability and result replacement/refund rules
 must be resolved and tested before enabling payouts. Full-transcript on-chain
 replay is not an allowed fallback.
@@ -160,3 +161,11 @@ claim. The remaining single-step verifier is blocked on a reproduced state-codec
 defect: valid canonical gameplay reaches quarter-unit coordinates, which the
 current doubled-integer state encoding rejects. Genesis authorization remains
 unchanged; it does not remedy this representation failure. No settlement is enabled.
+
+
+## Phase A numeric migration
+
+The dated blocker above is resolved by [fixed-point protocol v2](FIXED_POINT_PROTOCOL.md).
+Genesis binding and authorization v1 schemas are unchanged; their canonical rules
+fingerprint now identifies v2. Old authorizations are not promoted to the new
+protocol. No settlement or recovery entry point is added.

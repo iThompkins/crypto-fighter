@@ -1,3 +1,4 @@
+import { hashTraceState, CANONICAL_RULES_HASH } from "../src/protocol.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
@@ -9,7 +10,6 @@ import test from "node:test";
 import {
   createSessionWallet,
   hashFrameFields,
-  hashJson,
   hashPacketFields,
   signDigest,
   ZERO32,
@@ -99,7 +99,7 @@ async function makeValidTranscript() {
   const state = transition(initialState(), p1.inputMask, p2.inputMask);
   return {
     transcript: {
-      version: 1,
+      version: 2, rulesHash: CANONICAL_RULES_HASH,
       matchId,
       rules: { fps: 30, roundFrames: 300, maxHp: 7, oneOutstandingPacket: true, inputDelay: 2 },
       players: {
@@ -118,7 +118,7 @@ async function makeValidTranscript() {
       final: {
         frame: state.frame,
         frameHash,
-        stateHash: hashJson(state),
+        stateHash: hashTraceState(state),
         p1Hp: state.p1.hp,
         p2Hp: state.p2.hp,
         winner: state.winner,

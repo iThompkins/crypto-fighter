@@ -1,9 +1,12 @@
 import type { Fighter, GameState } from "./types";
-import { ATTACK, LEFT, RIGHT, UP } from "./input-mask.ts";
+import { ATTACK, LEFT, RIGHT, UP, isValidV1InputMask } from "./input-mask.ts";
 
-export const WIDTH = 720;
-export const HEIGHT = 360;
-export const FLOOR_Y = 260;
+export const SCALE = 256;
+// All geometry uses integer simulation units. Convert only at the UI boundary.
+export const toDisplayUnits = (value: number) => value / SCALE;
+export const WIDTH = 720 * SCALE;
+export const HEIGHT = 360 * SCALE;
+export const FLOOR_Y = 260 * SCALE;
 export const FPS = 30;
 export const ROUND_SECONDS = 10;
 export const ROUND_FRAMES = FPS * ROUND_SECONDS;
@@ -15,19 +18,19 @@ export const ROUND_FRAMES = FPS * ROUND_SECONDS;
 // opponent's packet for frame F - INPUT_DELAY. (INPUT_DELAY = 1 == old lockstep.)
 export const INPUT_DELAY = 2;
 
-export const FIGHTER_W = 28;
-export const FIGHTER_H = 56;
-export const MOVE_SPEED = 5;
+export const FIGHTER_W = 28 * SCALE;
+export const FIGHTER_H = 56 * SCALE;
+export const MOVE_SPEED = 5 * SCALE;
 
 export const ATTACK_ACTIVE_FRAMES = 4;
 export const ATTACK_COOLDOWN_FRAMES = 10;
-export const ATTACK_W = 18;
-export const ATTACK_H = 14;
-export const ATTACK_REACH = 22;
+export const ATTACK_W = 18 * SCALE;
+export const ATTACK_H = 14 * SCALE;
+export const ATTACK_REACH = 22 * SCALE;
 export const DAMAGE = 1;
 export const MAX_HP = 7;
-export const JUMP_VELOCITY = 22;
-export const GRAVITY = 2;
+export const JUMP_VELOCITY = 22 * SCALE;
+export const GRAVITY = 2 * SCALE;
 
 export const INPUT = {
   LEFT,
@@ -35,6 +38,14 @@ export const INPUT = {
   ATTACK,
   UP,
 } as const;
+
+// The collision numerator is nonnegative and bounded by 2*WIDTH.
+// Nearest integer, half ties to even. Solidity equivalent: q=n/2; q+(n%2)*(q%2).
+export function roundHalfToEven(n: number): number {
+  if (!Number.isSafeInteger(n) || n < 0 || n > 2 * WIDTH) throw new Error("invalid midpoint numerator");
+  const q = Math.floor(n / 2);
+  return q + (n % 2) * (q % 2);
+}
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -78,11 +89,11 @@ function rectsOverlap(
 export function getAttackRect(f: Fighter) {
   if (f.attackActive <= 0) return null;
 
-  const midY = f.y + Math.floor(f.h / 2) - Math.floor(ATTACK_H / 2);
+  const midY = f.y + Math.floor(FIGHTER_H / 2) - Math.floor(ATTACK_H / 2);
 
   if (f.facing === 1) {
     return {
-      x: f.x + f.w,
+      x: f.x + FIGHTER_W,
       y: midY,
       w: ATTACK_W + ATTACK_REACH,
       h: ATTACK_H,
@@ -104,10 +115,8 @@ export function initialState(): GameState {
     roundOver: false,
     winner: null,
     p1: {
-      x: 120,
+      x: 120 * SCALE,
       y: FLOOR_Y - FIGHTER_H,
-      w: FIGHTER_W,
-      h: FIGHTER_H,
       hp: MAX_HP,
       facing: 1,
       attackCooldown: 0,
@@ -115,10 +124,8 @@ export function initialState(): GameState {
       vy: 0,
     },
     p2: {
-      x: WIDTH - 120 - FIGHTER_W,
+      x: WIDTH - 120 * SCALE - FIGHTER_W,
       y: FLOOR_Y - FIGHTER_H,
-      w: FIGHTER_W,
-      h: FIGHTER_H,
       hp: MAX_HP,
       facing: -1,
       attackCooldown: 0,
@@ -129,9 +136,11 @@ export function initialState(): GameState {
 }
 
 export function transition(prev: GameState, p1Mask: number, p2Mask: number): GameState {
+  assertValidState(prev);
+  if (!isValidV1InputMask(p1Mask) || !isValidV1InputMask(p2Mask)) throw new Error("invalid input mask");
   if (prev.roundOver) return prev;
 
-  const s: GameState = JSON.parse(JSON.stringify(prev));
+  const s: GameState = { ...prev, p1: { ...prev.p1 }, p2: { ...prev.p2 } };
   s.frame += 1;
   s.timerFramesLeft = Math.max(0, s.timerFramesLeft - 1);
 
@@ -146,11 +155,11 @@ export function transition(prev: GameState, p1Mask: number, p2Mask: number): Gam
   const p1Move = (p1Input.left ? -MOVE_SPEED : 0) + (p1Input.right ? MOVE_SPEED : 0);
   const p2Move = (p2Input.left ? -MOVE_SPEED : 0) + (p2Input.right ? MOVE_SPEED : 0);
 
-  s.p1.x = clamp(s.p1.x + p1Move, 0, WIDTH - s.p1.w);
-  s.p2.x = clamp(s.p2.x + p2Move, 0, WIDTH - s.p2.w);
+  s.p1.x = clamp(s.p1.x + p1Move, 0, WIDTH - FIGHTER_W);
+  s.p2.x = clamp(s.p2.x + p2Move, 0, WIDTH - FIGHTER_W);
 
   // Vertical movement: jump + gravity (deterministic integer physics).
-  const groundY = FLOOR_Y - s.p1.h;
+  const groundY = FLOOR_Y - FIGHTER_H;
   if (p1Input.up && s.p1.y >= groundY) s.p1.vy = -JUMP_VELOCITY;
   if (p2Input.up && s.p2.y >= groundY) s.p2.vy = -JUMP_VELOCITY;
   s.p1.vy += GRAVITY;
@@ -163,13 +172,13 @@ export function transition(prev: GameState, p1Mask: number, p2Mask: number): Gam
   // Solid bodies: fighters cannot walk through each other, but only when their
   // vertical ranges overlap (so you can jump over an opponent).
   {
-    const fw = s.p1.w;
-    const vOverlap = s.p1.y < s.p2.y + s.p2.h && s.p1.y + s.p1.h > s.p2.y;
+    const fw = FIGHTER_W;
+    const vOverlap = s.p1.y < s.p2.y + FIGHTER_H && s.p1.y + FIGHTER_H > s.p2.y;
     const leftIsP1 = s.p1.x <= s.p2.x;
     const left = leftIsP1 ? s.p1 : s.p2;
     const right = leftIsP1 ? s.p2 : s.p1;
     if (vOverlap && right.x < left.x + fw) {
-      const center = (left.x + right.x + fw) / 2;
+      const center = roundHalfToEven(left.x + right.x + fw);
       right.x = center;
       left.x = center - fw;
       if (left.x < 0) {
@@ -203,8 +212,8 @@ export function transition(prev: GameState, p1Mask: number, p2Mask: number): Gam
   const p1Attack = getAttackRect(s.p1);
   const p2Attack = getAttackRect(s.p2);
 
-  const p1Body = { x: s.p1.x, y: s.p1.y, w: s.p1.w, h: s.p1.h };
-  const p2Body = { x: s.p2.x, y: s.p2.y, w: s.p2.w, h: s.p2.h };
+  const p1Body = { x: s.p1.x, y: s.p1.y, w: FIGHTER_W, h: FIGHTER_H };
+  const p2Body = { x: s.p2.x, y: s.p2.y, w: FIGHTER_W, h: FIGHTER_H };
 
   const p1Hits = !!p1Attack && rectsOverlap(p1Attack, p2Body);
   const p2Hits = !!p2Attack && rectsOverlap(p2Attack, p1Body);
@@ -229,4 +238,43 @@ export function transition(prev: GameState, p1Mask: number, p2Mask: number): Gam
   }
 
   return s;
+}
+
+// Structural/numeric domain, not a proof of reachability. Replay establishes that.
+export function assertValidState(s: GameState): void {
+  const keys = (v: object, expected: string[]) => {
+    if (!v || typeof v !== "object" || Object.keys(v).length !== expected.length || expected.some(k => !Object.hasOwn(v, k))) throw new Error("invalid state fields");
+  };
+  const integer = (n: number, lo: number, hi: number) => {
+    if (!Number.isSafeInteger(n) || Object.is(n, -0) || n < lo || n > hi) throw new Error("state requires bounded canonical integers");
+  };
+  keys(s, ["frame", "timerFramesLeft", "roundOver", "winner", "p1", "p2"]);
+  integer(s.frame, 0, ROUND_FRAMES);
+  integer(s.timerFramesLeft, 0, ROUND_FRAMES);
+  if (s.timerFramesLeft !== ROUND_FRAMES - s.frame) throw new Error("invalid state timer");
+  const fighterKeys = ["x", "y", "vy", "hp", "facing", "attackCooldown", "attackActive"];
+  for (const f of [s.p1, s.p2]) {
+    keys(f, fighterKeys);
+    integer(f.x, 0, WIDTH - FIGHTER_W);
+    integer(f.y, 94 * SCALE, FLOOR_Y - FIGHTER_H);
+    integer(f.vy, -20 * SCALE, 20 * SCALE);
+    if (f.y % GRAVITY !== 0 || f.vy % GRAVITY !== 0) throw new Error("invalid vertical lattice");
+    integer(f.hp, 0, MAX_HP);
+    integer(f.facing, -1, 1);
+    if (![1, -1].includes(f.facing)) throw new Error("invalid facing");
+    integer(f.attackCooldown, 0, ATTACK_COOLDOWN_FRAMES);
+    integer(f.attackActive, 0, ATTACK_ACTIVE_FRAMES);
+    if (f.attackActive > 0 ? f.attackCooldown !== f.attackActive + ATTACK_COOLDOWN_FRAMES - ATTACK_ACTIVE_FRAMES : f.attackCooldown > ATTACK_COOLDOWN_FRAMES - ATTACK_ACTIVE_FRAMES) throw new Error("invalid attack counters");
+  }
+  const terminal = s.p1.hp === 0 || s.p2.hp === 0 || s.timerFramesLeft === 0;
+  const winner = !terminal ? null : s.p1.hp === s.p2.hp ? "TIE_BOTH_LOSE" : s.p1.hp > s.p2.hp ? "P1" : "P2";
+  if (s.roundOver !== terminal || s.winner !== winner) throw new Error("invalid state outcome");
+  if (s.frame === 0) {
+    const initial = initialState();
+    for (const slot of ["p1", "p2"] as const) {
+      for (const key of fighterKeys as (keyof Fighter)[]) {
+        if (s[slot][key] !== initial[slot][key]) throw new Error("invalid genesis state");
+      }
+    }
+  }
 }

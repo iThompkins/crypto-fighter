@@ -1,10 +1,9 @@
 export type PlayerSlot = 1 | 2;
 
+// Geometry is an exact integer number of 1/256 game units. Dimensions are rules constants.
 export type Fighter = {
   x: number;
   y: number;
-  w: number;
-  h: number;
   hp: number;
   facing: 1 | -1;
   attackCooldown: number;
@@ -49,9 +48,10 @@ export type TranscriptPlayer = {
 };
 
 export type MatchTranscript = {
-  version: 1;
+  version: 2;
+  rulesHash: string;
   matchId: string;
-  // Legacy v1 metadata: must equal the canonical constants, never match options.
+  // Descriptive metadata: must equal the canonical constants, never match options.
   rules: {
     fps: number;
     roundFrames: number;

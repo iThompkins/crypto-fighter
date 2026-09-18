@@ -1,9 +1,9 @@
-import { addressFromPublicKey, hashFrameFields, hashJson, hashPacketFields, verifyPacket, ZERO32 } from "./crypto.ts";
+import { addressFromPublicKey, hashFrameFields, hashPacketFields, verifyPacket, ZERO32 } from "./crypto.ts";
 import { INPUT_DELAY, MAX_HP, ROUND_FRAMES, initialState, transition } from "./game.ts";
 import { isValidV1InputMask } from "./input-mask.ts";
 import type { GameState, MatchTranscript, SignedInputPacket } from "./types.ts";
 
-import { CANONICAL_V1_RULES as V1_RULES } from "./protocol.ts";
+import { CANONICAL_RULES as PINNED_RULES, CANONICAL_RULES_HASH, hashTraceState } from "./protocol.ts";
 export type TranscriptVerificationResult = {
   ok: boolean;
   complete: boolean;
@@ -25,7 +25,7 @@ const integer = (value: unknown, min: number, max: number) => typeof value === "
 function preflight(value: unknown): string[] {
   if (!object(value)) return ["transcript must be an object"];
   if (!Array.isArray(value.packets) || !Array.isArray(value.canonicalFrames)) return ["packet and canonical histories are required arrays"];
-  if (value.canonicalFrames.length > ROUND_FRAMES || value.packets.length > 2 * (ROUND_FRAMES + INPUT_DELAY)) return ["history exceeds v1 bounds"];
+  if (value.canonicalFrames.length > ROUND_FRAMES || value.packets.length > 2 * (ROUND_FRAMES + INPUT_DELAY)) return ["history exceeds v2 bounds"];
   const errors: string[] = [];
   // Preserve the mask preflight, including unused delayed packets.
   for (const [i, p] of value.packets.entries()) {
@@ -36,11 +36,12 @@ function preflight(value: unknown): string[] {
     if (!isValidV1InputMask(f?.p2InputMask)) errors.push(`invalid v1 input mask at canonicalFrames[${i}].p2InputMask`);
   }
   if (errors.length) return errors;
-  if (value.version !== 1) errors.push("unsupported transcript version");
+  if (value.version !== 2) errors.push("unsupported transcript version");
   if (!hex(value.matchId, 32) || value.matchId === ZERO32) errors.push("invalid matchId");
+  if (value.rulesHash !== CANONICAL_RULES_HASH) errors.push("unsupported rules fingerprint");
   const rules = value.rules;
-  if (!object(rules) || Object.keys(rules).length !== Object.keys(V1_RULES).length ||
-      Object.entries(V1_RULES).some(([key, expected]) => rules[key] !== expected)) errors.push("rules must match pinned v1 rules");
+  if (!object(rules) || Object.keys(rules).length !== Object.keys(PINNED_RULES).length ||
+      Object.entries(PINNED_RULES).some(([key, expected]) => rules[key] !== expected)) errors.push("rules must match pinned v2 rules");
   if (!object(value.players)) errors.push("player identities required");
   else {
     for (const [key, slot] of [["p1", 1], ["p2", 2]] as const) {
@@ -76,7 +77,7 @@ export async function verifyTranscript(value: unknown, options: { allowPartial?:
     complete: errors.length === 0 && state.roundOver,
     settlementEligible: false,
     errors, states,
-    replay: { frame: state.frame, frameHash: frameHead, stateHash: hashJson(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver, packetHeads },
+    replay: { frame: state.frame, frameHash: frameHead, stateHash: hashTraceState(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver, packetHeads },
   });
   if (errors.length) return result();
   const transcript = value as MatchTranscript;

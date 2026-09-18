@@ -5,13 +5,23 @@ import "./TraceCommitmentVerifier.sol";
 
 /// @notice Authenticated bisection only; no payout or replacement-result authority.
 abstract contract TraceDispute is TraceCommitmentVerifier {
+    // V2 codec only. Phase A does not introduce execution or payout authority.
+    struct FighterState {
+        int32 x;
+        int32 y;
+        int32 vy;
+        uint8 hp;
+        int8 facing;
+        uint8 attackCooldown;
+        uint8 attackActive;
+    }
     struct TraceState {
-        uint256 frame;
-        uint256 timer;
+        uint16 frame;
+        uint16 timer;
         bool terminal;
         uint8 outcome;
-        int256[9] p1;
-        int256[9] p2;
+        FighterState p1;
+        FighterState p2;
     }
     struct Opening { Checkpoint checkpoint; bytes32[] siblings; }
     enum TracePhase { None, Claimed, Bisecting, Adjacent }
@@ -37,7 +47,7 @@ abstract contract TraceDispute is TraceCommitmentVerifier {
         uint8 outcome;
     }
     mapping(uint256 => TraceGame) internal traceGames;
-    bytes32 internal constant STATE_TAG = keccak256("CryptoFighter:experimental-offchain-trace-v1:state");
+    bytes32 internal constant STATE_TAG = keccak256("CryptoFighter:fixed-point-trace-v2:state");
     event TraceClaimed(uint256 indexed id, address indexed claimant, bytes32 root, uint256 deadline);
     event TraceChallenged(uint256 indexed id, address indexed challenger, bytes32 root, uint256 deadline);
     event TraceMidpoint(uint256 indexed id, uint256 round, address indexed participant, bytes32 checkpointHash);
@@ -50,10 +60,10 @@ abstract contract TraceDispute is TraceCommitmentVerifier {
     function genesisCheckpointHash() public pure returns (bytes32) {
         TraceState memory s;
         s.timer = 300;
-        s.p1 = [int256(240),408,56,112,7,1,0,0,0];
-        s.p2 = [int256(1144),408,56,112,7,-1,0,0,0];
+        s.p1 = FighterState(30720,52224,0,7,1,0,0);
+        s.p2 = FighterState(146432,52224,0,7,-1,0,0);
         return keccak256(abi.encode(
-            keccak256("CryptoFighter:experimental-offchain-trace-v1:checkpoint"),
+            keccak256("CryptoFighter:fixed-point-trace-v2:checkpoint"),
             hashTraceState(s), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0)
         ));
     }

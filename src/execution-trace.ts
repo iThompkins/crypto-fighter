@@ -2,14 +2,14 @@ import { AbiCoder, getAddress, id, keccak256 } from "ethers";
 import * as game from "./game.ts";
 import { ZERO32 } from "./crypto.ts";
 import { verifyTranscript } from "./verifier.ts";
-import { CANONICAL_RULES_HASH, hashTraceState } from "./protocol.ts";
+import { CANONICAL_RULES_HASH, hashTraceState, TRACE_DOMAIN } from "./protocol.ts";
 export { encodeTraceState, hashTraceState } from "./protocol.ts";
 import { hashGenesisBinding, verifyGenesisAuthorization, type GenesisAuthorization, type GenesisBinding, type GenesisRecord } from "./genesis.ts";
 import type { MatchTranscript } from "./types.ts";
 
 const abi = AbiCoder.defaultAbiCoder();
 const digest = (types: string[], values: unknown[]) => keccak256(abi.encode(types, values));
-const tag = (name: string) => id(`CryptoFighter:experimental-offchain-trace-v1:${name}`);
+const tag = (name: string) => id(`${TRACE_DOMAIN}:${name}`);
 export const TRACE_DEPTH = 9;
 export const TRACE_LAST_INDEX = game.ROUND_FRAMES;
 const hash32 = (value: unknown): value is string => typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
@@ -36,7 +36,7 @@ function node(left: string, right: string): string {
 }
 export type TraceOpening = { index: number; checkpoint: TraceCheckpoint; siblings: string[] };
 export type ExecutionTrace = {
-  format: "experimental-offchain-trace-v1" | "genesis-authorized-trace-v1";
+  format: "fixed-point-trace-v2" | "genesis-authorized-trace-v2";
   genesis?: string;
   genesisAuthorized?: true;
   settlementEligible: false;
@@ -93,7 +93,7 @@ async function buildTrace(value: unknown, binding?: GenesisBinding): Promise<Exe
     levels.push(next);
   }
   return {
-    format: binding ? "genesis-authorized-trace-v1" : "experimental-offchain-trace-v1", settlementEligible: false,
+    format: binding ? "genesis-authorized-trace-v2" : "fixed-point-trace-v2", settlementEligible: false,
     ...(binding ? { genesis: binding.genesis, genesisAuthorized: true as const } : {}),
     contextHash, rulesHash: CANONICAL_RULES_HASH, root: levels.at(-1)![0],
     terminalFrame: verified.replay.frame, terminalStateHash: terminal.stateHash, checkpoints, levels,

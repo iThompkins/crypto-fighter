@@ -1,3 +1,4 @@
+import { hashTraceState } from "../src/protocol.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
@@ -5,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { verifyTranscript } from "../src/verifier.ts";
-import { hashJson, hashPacketFields, signDigest, ZERO32 } from "../src/crypto.ts";
+import { hashPacketFields, signDigest, ZERO32 } from "../src/crypto.ts";
 import { initialState, transition } from "../src/game.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "crypto-fighter-integrity-"));
@@ -18,7 +19,7 @@ function prefix() {
   t.canonicalFrames = t.canonicalFrames.slice(0, 1);
   t.packets = t.packets.filter((p) => p.frame === 1);
   const state = transition(initialState(), t.packets[0].inputMask, t.packets[1].inputMask);
-  t.final = { frame: 1, frameHash: t.canonicalFrames[0].frameHash, stateHash: hashJson(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: null, roundOver: false };
+  t.final = { frame: 1, frameHash: t.canonicalFrames[0].frameHash, stateHash: hashTraceState(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: null, roundOver: false };
   return t;
 }
 
@@ -39,7 +40,10 @@ for (const [name, mutate] of [
   ["invalid packet slot", (t) => { t.packets[0].player = 3; }],
   ["short match identifier", (t) => { t.matchId = "0x11"; }],
   ["zero match identifier", (t) => { t.matchId = ZERO32; }],
-  ["different rules version", (t) => { t.version = 2; }],
+  ["retired transcript v1", (t) => { t.version = 1; }],
+  ["unknown transcript version", (t) => { t.version = 3; }],
+  ["missing rules fingerprint", (t) => { delete t.rulesHash; }],
+  ["old rules fingerprint", (t) => { t.rulesHash = "0x1ae89ee81810335d8b8b2ee8d7e9237fef05704a9fae836f3e748fcafdca65cc"; }],
   ["altered delay", (t) => { t.rules.inputDelay = 1; }],
   ["altered HP rules", (t) => { t.rules.maxHp = 100; }],
   ["altered round limit", (t) => { t.rules.roundFrames = 1000; }],

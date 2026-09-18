@@ -1,12 +1,12 @@
 const assert = require('node:assert/strict');
 const { ethers, network } = require('hardhat');
 const abi = ethers.AbiCoder.defaultAbiCoder();
-const tag = (s) => ethers.id(`CryptoFighter:experimental-offchain-trace-v1:${s}`);
+const tag = (s) => ethers.id(`CryptoFighter:fixed-point-trace-v2:${s}`);
 const hash = (types, values) => ethers.keccak256(abi.encode(types, values));
 const zero = ethers.ZeroHash;
 const checkpoint = (stateHash) => ({ stateHash, frameHead: zero, p1Head: zero, p2Head: zero, p1PreviousHead: zero, p2PreviousHead: zero });
 const cpHash = (c) => hash(Array(7).fill('bytes32'), [tag('checkpoint'), ...Object.values(c)]);
-const state = (frame = 300) => ({ frame, timer: 300 - frame, terminal: true, outcome: 3, p1: [240,408,56,112,7,1,0,0,0], p2: [1144,408,56,112,7,-1,0,0,0] });
+const state = (frame = 300) => ({ frame, timer: 300 - frame, terminal: true, outcome: 3, p1: [30720,52224,0,7,1,0,0], p2: [146432,52224,0,7,-1,0,0] });
 function tree(context, checkpoints) {
   const leaves = Array.from({length:512}, (_, i) => i <= 300
     ? hash(['bytes32','bytes32','uint256','bytes32'], [tag('leaf'), context, i, cpHash(checkpoints[i])])

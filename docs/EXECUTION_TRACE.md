@@ -1,3 +1,6 @@
+> Current numeric status: Phase A v2 is documented in [FIXED_POINT_PROTOCOL.md](FIXED_POINT_PROTOCOL.md).
+> Earlier dated implementation notes below describe historical milestones.
+
 # Execution trace and interactive disputes
 
 ## Architectural decision
@@ -22,10 +25,10 @@ coordinator, and compact Solidity Merkle membership verification are now
 implemented. See [GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md) for exact
 formats, chain authority, lifecycle and tested limits. On-chain trace claims
 and bisection turns/deadlines are implemented below.
-Minimal transition adjudication is blocked on the reachable-coordinate encoding
-defect documented under State encoding.
-The sections below preserve the original design and experimental encoding; they
-must not be read as claiming a complete settlement protocol.
+Phase A replaces the defective coordinate encoding with fixed-point v2.
+Minimal transition adjudication, authenticated recovery and trace settlement
+remain unimplemented. The sections below describe the design and implementation
+boundaries; they do not claim a complete settlement protocol.
 
 ## Repository inspection and reuse
 
@@ -52,7 +55,7 @@ availability must be specified before one-step verification can resolve them.
 
 ## Implemented experimental off-chain format
 
-`src/execution-trace.ts` implements `experimental-offchain-trace-v1`, with CLI
+`src/execution-trace.ts` implements `fixed-point-trace-v2`, with CLI
 `npm run commit-trace -- transcript.json [checkpoint-index]`. It clones the input
 before asynchronous verification, accepts only complete terminal transcripts,
 and always marks its output `settlementEligible: false`.
@@ -60,9 +63,9 @@ and always marks its output `settlementEligible: false`.
 the off-chain trace and checks root, format, context, rules and terminal metadata;
 checkpoint membership verification alone does not establish those facts.
 
-This domain is deliberately distinct from the future escrow-bound protocol.
+This diagnostic context is deliberately distinct from the authorized trace context.
 Its context hash commits match ID, full numeric rules/genesis hash with semantic revision,
-both session addresses and public-key hashes. V1 packets do not sign this context.
+both session addresses and public-key hashes. Compact move packets do not directly sign this context.
 It cannot be upgraded to an escrow authorization by attaching a chain ID later.
 The protocol authenticates a fresh random UUID-like genesis ID
 against its immutable escrow record once, before play. That binding identifies
@@ -86,49 +89,35 @@ pending; practice games do not implicitly gain escrow authority.
 
 There are no configurable per-match damage, timing, physics, or other combat
 parameters. `src/protocol.ts` exports the fixed canonical version, immutable
-legacy v1 metadata and canonical fingerprint. The fingerprint is computed once
+v2 metadata and canonical fingerprint. The fingerprint is computed once
 from the canonical implementation's constants, semantic revision and initial
-state, not from caller-supplied match settings. Its bytes are unchanged by this
-clarification/refactor. It identifies a version for replay and compatibility.
+state, not from caller-supplied match settings. Phase A replaces its bytes with the v2 fingerprint. It identifies a version for replay and compatibility.
 A future global gameplay revision needs a new version/fingerprint; it is not a
 new set of options that players negotiate at matchmaking.
 
-The old transcript `rules` object remains only for v1 wire compatibility and must
+The old transcript `rules` object remains as descriptive metadata and must
 exactly match the canonical values. It never drives simulation parameters. The
 contract's `rulesHash` argument is retained as a version identifier, but only the
 single canonical fingerprint is accepted. Escrow stake and response deadlines
 remain escrow terms; they do not configure the game timer or physics.
 
 All hashes use Keccak-256 of Solidity ABI encoding, not JSON. Domain tags are
-`keccak256(UTF8("CryptoFighter:experimental-offchain-trace-v1:" + suffix))`.
+`keccak256(UTF8("CryptoFighter:fixed-point-trace-v2:" + suffix))`.
 Exact fields and types are defined by the exported encoder and builder.
 
 ### State encoding
 
-State encodes, in fixed order: state domain, frame, remaining timer, terminal
-boolean, outcome (0 pending, 1 P1, 2 P2, 3 tie), then P1 and P2 fighter arrays.
-Each fighter is nine signed ABI words: x, y, width, height, HP, facing, cooldown,
-active attack duration, vertical velocity. Geometric values and velocity are
-multiplied by two; remaining fields are unscaled. Values must be exact safe
-integers after scaling. No rounding is allowed.
+Phase A uses the [fixed-point v2 numeric protocol](FIXED_POINT_PROTOCOL.md).
+State encodes a domain, uint16 frame/timer, bool terminal, uint8 outcome, and two
+seven-field fighter tuples (x,y,vy,hp,facing,cooldown,active). Coordinates and
+velocity are raw SCALE=256 integers; dimensions are compiled rules constants.
+Transcript final-state hashes use these same bytes. Encoding never rounds.
 
-**Known blocker (2026-09-17): this encoding is insufficient for reachable states.**
-Independent movement clamping breaks the previously asserted equal-fraction
-invariant. From genesis, 85 frames of masks (2,0) yield x=(544.5,572.5),
-110 frames of (1,0) yield x=(0,572.5), and 55 frames of (2,1) yield
-x=(272.25,300.25) at frame 250. Fifty idle frames then produce a valid terminal
-tie. Strict signed transcript verification succeeds, but both trace builders
-reject it because doubled quarter coordinates are not integers.
-
-`test/trace-geometry-blocker.test.mjs` preserves the complete authenticated
-reproduction. The single-transition implementation was withdrawn before commit
-because it relied on the false invariant. Do not round these coordinates or
-silently alter collision/clamping behavior. A new encoding/version still requires
-approval before implementing the verifier. The subsequent
-[horizontal numeric-domain analysis](HORIZONTAL_NUMERIC_DOMAIN.md) proves a tight
-2^-48 lattice for stored x values, reached by frame203. This establishes an exact
-bounded integer representation, but matching transitions also requires preserving
-ordered binary64 rounding. Scale4 is not sufficient. The trace format is unchanged.
+The former half-unit codec rejected valid quarter-unit histories. The subsequent
+2^-48 analysis describes retired binary64 behavior, not current physics. V2
+intentionally replaces that behavior with nearest integer midpoints, ties to even.
+The authenticated wall/recollision regression now successfully commits. Old roots,
+fingerprints and transcript versions are not compatible.
 
 ### Checkpoints, leaves and padding
 
@@ -200,10 +189,12 @@ rebuilt output when importing a claim.
 
 ## Next implementation boundary
 
-The genesis binding, compact move authentication, trace claims and midpoint
-turns/deadlines are implemented. Next resolve the state-encoding blocker above,
-then implement the canonical single-transition verifier, authenticated timeout
-resolution and adversarial end-to-end validation. No full-transcript on-chain
+Genesis authorization helpers, trace claims and midpoint turns/deadlines are
+implemented, but live browser match/input authentication is incomplete. Phase A
+state-encoding migration is complete. Phase B must next establish authenticated
+match lifecycle and input chains, including reconnect and durable evidence.
+Single-transition adjudication, authenticated timeout resolution and settlement
+integration belong to later phases and must consume those Phase B guarantees. No full-transcript on-chain
 replay fallback is permitted. Replacement, equivocation, both-invalid and
 non-response payout rules still require explicit decisions before settlement.
 

@@ -20,7 +20,7 @@ function fraudulentTrace(firstBadFrame) {
   const fake = structuredClone(trace);
   const abi = AbiCoder.defaultAbiCoder();
   const digest = (types, values) => keccak256(abi.encode(types, values));
-  const tag = (name) => id(`CryptoFighter:experimental-offchain-trace-v1:${name}`);
+  const tag = (name) => id(`CryptoFighter:fixed-point-trace-v2:${name}`);
   for (let i = firstBadFrame; i <= 300; i++) {
     fake.checkpoints[i].stateHash = id("fabricated state");
     fake.levels[0][i] = digest(["bytes32", "bytes32", "uint256", "bytes32"], [tag("leaf"), fake.contextHash, i, hashCheckpoint(fake.checkpoints[i])]);

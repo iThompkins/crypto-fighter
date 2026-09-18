@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initialState, transition } from "../src/game.ts";
+import { initialState, transition } from "./fixtures/legacy-binary64.mjs";
 
 // Analysis-only integers; neither the simulation nor the trace codec uses this
 // representation. See docs/HORIZONTAL_NUMERIC_DOMAIN.md for the universal proof.

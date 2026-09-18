@@ -7,8 +7,8 @@ describe("Canonical gameplay version", function () {
     const arena = await Arena.deploy();
     const [p1] = await ethers.getSigners();
     const canonical = await arena.CANONICAL_RULES_HASH();
-    assert.equal(canonical, "0x1ae89ee81810335d8b8b2ee8d7e9237fef05704a9fae836f3e748fcafdca65cc");
-    for (const rules of [ethers.ZeroHash, ethers.id("custom-damage"), ethers.id("custom-physics")]) {
+    assert.equal(canonical, "0x45e7b6011925954ee1b15160173864f8deea010e005bd0c4dfca5fbc1d503a18");
+    for (const rules of [ethers.ZeroHash, "0x1ae89ee81810335d8b8b2ee8d7e9237fef05704a9fae836f3e748fcafdca65cc", ethers.id("custom-damage"), ethers.id("custom-physics")]) {
       await assert.rejects(arena.challenge(ethers.randomBytes(32), rules, p1.address, ethers.ZeroAddress, 86400, { value: 1n }), (error) => {
         // viaIR source mapping can omit the reason in Hardhat's message.
         const decoded = arena.interface.parseError(error.data);

@@ -41,6 +41,31 @@ test("generated terminal replay agrees in browser and CLI; settlement stays disa
   expect(browser.replay).toEqual(cli.replay);
   expect(browser.replay.winner).toBe("P1");
   expect(browser.replay.roundOver).toBe(true);
+  expect(transcript.version).toBe(2);
+  // Verify actual CSS conversion at genesis and during an active attack.
+  for (const frame of [0, 80]) {
+    await page.locator('input[type="range"]').fill(String(frame));
+    const expectedState = browser.states[frame];
+    const geometry = await page.evaluate(() => {
+      const arena = document.querySelector('[aria-label="Game arena"]');
+      const rect = label => {
+        const style = document.querySelector(`[aria-label="${label}"]`).style;
+        return ['left','top','width','height'].map(k => parseFloat(style[k]));
+      };
+      return { scale: parseFloat(arena.style.width)/720, p1: rect('Player 1 fighter'), p2: rect('Player 2 fighter'), attack: document.querySelector('[aria-label="Player 1 attack"]') ? rect('Player 1 attack') : null };
+    });
+    for (const slot of ['p1','p2']) {
+      const f = expectedState[slot];
+      const expected = [f.x/256,f.y/256,28,56];
+      geometry[slot].forEach((v,i) => expect(v/geometry.scale).toBeCloseTo(expected[i],3));
+    }
+    if (frame === 80) {
+      expect(geometry.attack).not.toBeNull();
+      const f=expectedState.p1;
+      [f.x/256+28,f.y/256+21,40,14].forEach((v,i)=>expect(geometry.attack[i]/geometry.scale).toBeCloseTo(v,3));
+    }
+  }
+
   const traceCli = JSON.parse(execFileSync(process.execPath, ["tools/commit-trace.mjs", file, "90"], { encoding: "utf8" }));
   const traceBrowser = await page.evaluate(async (value) => {
     const { buildExecutionTrace, openTrace, verifyTraceOpening } = await import("/src/execution-trace.ts");
