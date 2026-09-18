@@ -7,9 +7,11 @@ import { arena, connectWallet, outcomeFromWinner, CANONICAL_RULES_HASH, stakeWei
 import type { Signer } from "ethers";
 import type { TranscriptVerificationResult } from "./verifier";
 import { verifyTranscript } from "./verifier";
-import { CANONICAL_RULES, hashTraceState } from "./protocol.ts";
+import { hashTraceState } from "./protocol.ts";
 import { LiveMatch, configHash, hex, object, verifyReady, type LiveConfig } from "./live-match";
 import { BrowserEvidenceStore } from "./evidence-store";
+import { reconstructEvidence, canonicalJson, type EvidenceArchive } from "./evidence-archive";
+import { buildEvidenceBundle } from "./evidence-trace";
 import { hello, verifyHello } from "./live-discovery";
 import { createGenesisSession, hashGenesisBinding, verifyGenesisConsent, readGenesisRecord, type GenesisAuthorization, type GenesisRecord } from "./genesis";
 import type { CanonicalFrame, GameState, MatchTranscript, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
@@ -574,9 +576,10 @@ export default function App() {
         downloadText("recovered-genesis-consent.json", JSON.stringify(events[0], null, 2));
         return;
       }
-      const recovered = await LiveMatch.recover(context, evidenceStore());
-      downloadText(`evidence-${context.slice(2, 10)}.json`, JSON.stringify(recovered.snapshot(), null, 2));
-      log("Recovered verified evidence for inspection; old signing key is unavailable.");
+      const archive: EvidenceArchive = { format: "phase-b-journal-v1", journal: await evidenceStore().read(context) };
+      const bundle = await buildEvidenceBundle(archive);
+      downloadText(`evidence-${context.slice(2, 10)}.json`, canonicalJson(bundle));
+      log(`Recovered evidence: ${bundle.reconstruction.status}; inspection only, signing remains unavailable.`);
     } catch (error) { setLastError(String(error)); }
   }
 
@@ -744,27 +747,27 @@ export default function App() {
     ? `Waiting for P${remoteSlot} packet ${nextFrame}`
     : `Ready to sign packet ${nextFrame}`;
 
-  // Build the transcript on demand (Copy/Download) instead of every frame.
-  // Serializing the whole growing transcript per frame was O(n^2) and the main
-  // source of the slowdown as a match progressed.
-  const buildTranscript = useCallback((): MatchTranscript => {
-    const byKey = new Map<string, SignedInputPacket>();
-    for (const packet of packets) byKey.set(`${packet.frame}:${packet.player}`, packet);
-    const uniquePackets = [...byKey.values()].sort((a, b) => a.frame - b.frame || a.player - b.player);
-    const p1Local = localSlot === 1;
-    return {
-      version: 2, rulesHash: CANONICAL_RULES_HASH,
-      matchId,
-      rules: CANONICAL_RULES,
-      players: {
-        p1: { slot: 1, address: p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
-        p2: { slot: 2, address: !p1Local ? wallet?.address ?? "" : remoteWalletAddress, publicKey: !p1Local ? wallet?.publicKey ?? "" : remoteWalletPubKey },
-      },
-      packets: uniquePackets,
-      canonicalFrames,
-      final: { frame: state.frame, frameHash: finalFrameHash, stateHash: hashTraceState(state), p1Hp: state.p1.hp, p2Hp: state.p2.hp, winner: state.winner, roundOver: state.roundOver },
-    };
-  }, [packets, canonicalFrames, localSlot, matchId, wallet?.address, wallet?.publicKey, remoteWalletAddress, remoteWalletPubKey, finalFrameHash, state]);
+  async function exportTranscript(copyOnly = false) {
+    try {
+      const live = liveRef.current;
+      if (!live) throw new Error("No durable live evidence; use saved evidence inspection after reload.");
+      const result = await reconstructEvidence(await live.exportEvidence());
+      if (result.status !== "complete" || !result.transcript) throw new Error(`Evidence is ${result.status}; export the evidence bundle for inspection.`);
+      const json = canonicalJson(result.transcript);
+      if (copyOnly) await copy(json);
+      else downloadText(`transcript-${result.config.matchId.slice(0, 10)}.json`, json);
+    } catch (error) { setLastError(String(error)); }
+  }
+
+  async function exportDisputeEvidence() {
+    try {
+      const live = liveRef.current;
+      if (!live) throw new Error("No live evidence; use a saved evidence entry after reload.");
+      const bundle = await buildEvidenceBundle(await live.exportEvidence());
+      downloadText(`dispute-evidence-${bundle.reconstruction.context.slice(2, 10)}.json`, canonicalJson(bundle));
+      log(`Exported ${bundle.reconstruction.status} evidence (${bundle.authority}).`);
+    } catch (error) { setLastError(String(error)); }
+  }
 
   const finalSettlementPayload = useMemo(() => {
     if (!state.roundOver || !finalStateHash) return "";
@@ -875,6 +878,7 @@ export default function App() {
             </div>
             <div style={styles.sub}>Practice discovery proves session-key possession; it does not authorize escrow.</div>
             <button style={styles.smallButton} onClick={() => { connRef.current?.close(); }}>Disconnect</button>
+            <button style={styles.smallButton} onClick={() => void exportDisputeEvidence()}>Export dispute evidence</button>
             <button style={styles.smallButton} onClick={() => void evidenceStore().contexts().then(setSavedContexts).catch(e => setLastError(String(e)))}>Refresh saved evidence</button>
             {savedContexts.map(context => <button key={context} style={styles.smallButton} onClick={() => void inspectEvidence(context)}>Inspect {short(context, 16)}</button>)}
             {lastError ? <div style={styles.error}>{lastError}</div> : null}
@@ -1080,12 +1084,12 @@ export default function App() {
               {packets.length} packets · {canonicalFrames.length} canonical frames · head {short(finalFrameHash, 18)}
             </div>
             <div style={styles.row}>
-              <button style={styles.smallButton} onClick={() => void copy(JSON.stringify(buildTranscript(), null, 2))}>
+              <button style={styles.smallButton} onClick={() => void exportTranscript(true)}>
                 Copy Transcript
               </button>
               <button
                 style={styles.smallButton}
-                onClick={() => downloadText(`transcript-${matchId.slice(0, 10)}.json`, JSON.stringify(buildTranscript(), null, 2))}
+                onClick={() => void exportTranscript()}
               >
                 Download JSON
               </button>

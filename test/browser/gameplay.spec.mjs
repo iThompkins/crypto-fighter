@@ -93,6 +93,7 @@ test("generated terminal replay agrees in browser and CLI; settlement stays disa
 });
 
 test("two real browser peers finish an idle round with identical complete histories", async ({ context }, testInfo) => {
+  test.setTimeout(120_000);
   const host = await context.newPage();
   const joiner = await context.newPage();
   const errors = [];
@@ -127,5 +128,16 @@ test("two real browser peers finish an idle round with identical complete histor
     const cli = JSON.parse(execFileSync(process.execPath, ["tools/verify-match.mjs", file], { encoding: "utf8" }));
     expect(cli.replay).toEqual(result.replay);
   }
+  const downloadPromise = host.waitForEvent("download");
+  await host.getByRole("button", { name: "Export dispute evidence", exact: true }).click();
+  const artifactText = await readFile(await (await downloadPromise).path(), "utf8");
+  const artifact = JSON.parse(artifactText);
+  expect(artifact.reconstruction.status).toBe("complete");
+  expect(artifact.reconstruction.transcript).toEqual(a);
+  const archiveFile = testInfo.outputPath("live-archive.json");
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(archiveFile, JSON.stringify(artifact.archive));
+  const rebuilt = execFileSync(process.execPath, ["tools/evidence-trace.mjs", "build", archiveFile], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  expect(rebuilt.trim()).toBe(artifactText);
   expect(errors).toEqual([]);
 });

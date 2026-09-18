@@ -36,7 +36,7 @@ function node(left: string, right: string): string {
 }
 export type TraceOpening = { index: number; checkpoint: TraceCheckpoint; siblings: string[] };
 export type ExecutionTrace = {
-  format: "fixed-point-trace-v2" | "genesis-authorized-trace-v2";
+  format: "fixed-point-trace-v2" | "genesis-authorized-trace-v2" | "genesis-historical-trace-v2";
   genesis?: string;
   genesisAuthorized?: true;
   settlementEligible: false;
@@ -49,7 +49,7 @@ export type ExecutionTrace = {
   levels: string[][];
 };
 
-async function buildTrace(value: unknown, binding?: GenesisBinding): Promise<ExecutionTrace> {
+async function buildTrace(value: unknown, binding?: GenesisBinding, historical = false): Promise<ExecutionTrace> {
   // Snapshot before awaiting so mutation during signature verification cannot
   // change the committed inputs after they have been checked.
   const transcript = structuredClone(value) as MatchTranscript;
@@ -93,8 +93,8 @@ async function buildTrace(value: unknown, binding?: GenesisBinding): Promise<Exe
     levels.push(next);
   }
   return {
-    format: binding ? "genesis-authorized-trace-v2" : "fixed-point-trace-v2", settlementEligible: false,
-    ...(binding ? { genesis: binding.genesis, genesisAuthorized: true as const } : {}),
+    format: binding ? (historical ? "genesis-historical-trace-v2" : "genesis-authorized-trace-v2") : "fixed-point-trace-v2", settlementEligible: false,
+    ...(binding ? { genesis: binding.genesis, ...(!historical ? { genesisAuthorized: true as const } : {}) } : {}),
     contextHash, rulesHash: CANONICAL_RULES_HASH, root: levels.at(-1)![0],
     terminalFrame: verified.replay.frame, terminalStateHash: terminal.stateHash, checkpoints, levels,
   };
@@ -108,6 +108,14 @@ export async function buildAuthorizedExecutionTrace(value: unknown, authorizatio
   const auth = structuredClone(authorization), authoritative = structuredClone(record);
   if (!verifyGenesisAuthorization(auth, authoritative)) throw new Error("genesis not authoritatively authorized");
   return buildTrace(value, auth.binding);
+}
+
+// Offline reconstruction verifies signatures and a historical record's internal
+// consistency only. It does not assert current canonical-chain activation.
+export async function buildHistoricalExecutionTrace(value: unknown, authorization: GenesisAuthorization, historicalRecord: GenesisRecord): Promise<ExecutionTrace> {
+  const auth = structuredClone(authorization), record = structuredClone(historicalRecord);
+  if (!verifyGenesisAuthorization(auth, record)) throw new Error("invalid historical authorization");
+  return buildTrace(value, auth.binding, true);
 }
 
 export async function verifyAuthorizedExecutionTraceCommitment(value: unknown, claim: unknown, authorization: GenesisAuthorization, record: GenesisRecord): Promise<boolean> {

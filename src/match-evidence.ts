@@ -36,7 +36,8 @@ export function createPacketEvidence(matchId: string, p1Session: string, p2Sessi
             !isValidV1InputMask(p.inputMask) || !hex(p.matchId, 32) || !hex(p.hash, 32) || !hex(p.prevSelfHash, 32) || !hex(p.prevOppHash, 32) || !hex(p.signature, 65) || !hex(p.publicKey, 65)) {
           return { kind: "unattributed-rejection", reason: "malformed packet" };
         }
-        if (p.matchId !== matchId) return { kind: "unattributed-rejection", reason: "wrong genesis" };
+        for (const field of ["matchId", "prevSelfHash", "prevOppHash", "publicKey", "signature", "hash"] as const) p[field] = p[field].toLowerCase();
+        if (p.matchId !== matchId.toLowerCase()) return { kind: "unattributed-rejection", reason: "wrong genesis" };
         const expected = p.player === 1 ? p1Session : p2Session;
         try {
           if (addressFromPublicKey(p.publicKey).toLowerCase() !== expected.toLowerCase() || !await verifyPacket(p)) {

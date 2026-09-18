@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('live disconnect/reconnect preserves history; reload recovers inspection without signing', async ({ context }) => {
+  test.setTimeout(120_000);
   const host = await context.newPage(), joiner = await context.newPage();
   const errors = [];
   for (const page of [host, joiner]) page.on('pageerror', e => errors.push(e.message));
@@ -26,22 +27,39 @@ test('live disconnect/reconnect preserves history; reload recovers inspection wi
   await expect(joiner.getByText('Connected', { exact: true })).toBeVisible();
   await expect(host.getByText('300 / 300', { exact: true })).toBeVisible({ timeout: 45_000 });
   await expect(joiner.getByText('300 / 300', { exact: true })).toBeVisible({ timeout: 45_000 });
+  const uninterrupted = await host.evaluate(async () => {
+    const { BrowserEvidenceStore } = await import('/src/evidence-store.ts');
+    const { buildEvidenceBundle } = await import('/src/evidence-trace.ts');
+    const { canonicalJson } = await import('/src/evidence-archive.ts');
+    const store = new BrowserEvidenceStore();
+    const results = [];
+    for (const context of await store.contexts()) {
+      const bundle = await buildEvidenceBundle({ format: 'phase-b-journal-v1', journal: await store.read(context) });
+      results.push(canonicalJson({ transcript: bundle.reconstruction.transcript, states: bundle.reconstruction.states, trace: bundle.trace }));
+    }
+    return results;
+  });
   await host.reload();
   await expect(host.getByRole('button', { name: 'Start Match', exact: true })).toBeDisabled();
   const recovered = await host.evaluate(async () => {
     const { BrowserEvidenceStore } = await import('/src/evidence-store.ts');
     const { LiveMatch } = await import('/src/live-match.ts');
+    const { buildEvidenceBundle } = await import('/src/evidence-trace.ts');
+    const { canonicalJson } = await import('/src/evidence-archive.ts');
     const store = new BrowserEvidenceStore();
     const result = [];
     for (const context of await store.contexts()) {
       const match = await LiveMatch.recover(context, store);
       let rejected = false;
       try { await match.consent(); } catch { rejected = true; }
-      result.push({ snapshot: match.snapshot(), rejected, outbound: await match.tick(1) });
+      const bundle = await buildEvidenceBundle(await match.exportEvidence());
+      result.push({ snapshot: match.snapshot(), rejected, outbound: await match.tick(1), canonical: canonicalJson({ transcript: bundle.reconstruction.transcript, states: bundle.reconstruction.states, trace: bundle.trace }) });
     }
     return result;
   });
   expect(recovered).toHaveLength(2);
+  expect(recovered.map(value => value.canonical)).toEqual(uninterrupted);
+  expect(uninterrupted[0]).toBe(uninterrupted[1]);
   for (const value of recovered) {
     expect(value.snapshot.status).toBe('inspection');
     expect(value.snapshot.state.frame).toBe(300);

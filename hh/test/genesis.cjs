@@ -38,7 +38,7 @@ async function setup(options = {}) {
 const activate = (m) => m.arena.connect(m.relayer).authorizeGenesis(1, m.auth.p1Signature, m.auth.p2Signature);
 
 describe("Authoritative genesis binding", function () {
-  it("builds an authorized trace from the actual activated chain record", async function () {
+  it("builds an evidence-derived trace from the actual activated chain record", async function () {
     const s1 = new ethers.Wallet("0x" + "1".padStart(64, "0"));
     const s2 = new ethers.Wallet("0x" + "2".padStart(64, "0"));
     const m = await setup({ matchId: "0x" + "11".repeat(32), s1, s2 });
@@ -48,14 +48,35 @@ describe("Authoritative genesis binding", function () {
     execFileSync(process.execPath, [path.resolve(__dirname, "../../tools/make-transcript.mjs"), file]);
     const transcript = JSON.parse(readFileSync(file, "utf8"));
     const traceModule = await import(pathToFileURL(path.resolve(__dirname, "../../src/execution-trace.ts")).href);
-    const trace = await traceModule.buildAuthorizedExecutionTrace(transcript, m.auth, record);
+    const baseline = await traceModule.buildAuthorizedExecutionTrace(transcript, m.auth, record);
+    const liveProtocol = await import(pathToFileURL(path.resolve(__dirname, "../../src/live-protocol.ts")).href);
+    const evidenceModule = await import(pathToFileURL(path.resolve(__dirname, "../../src/evidence-trace.ts")).href);
+    const config = { version: 1, mode: "escrow", matchId: m.matchId, rulesHash: record.binding.rulesHash,
+      p1PublicKey: s1.signingKey.publicKey, p2PublicKey: s2.signingKey.publicKey, authorization: m.auth };
+    const context = liveProtocol.configHash(config);
+    const readiness = [s1, s2].map((key, index) => ({ type: "READY", context, slot: index + 1,
+      signature: key.signingKey.sign(liveProtocol.lifecycleDigest(context, index + 1, "READY")).serialized }));
+    const archive = { format: "phase-b-journal-v1", journal: [
+      { kind: "genesis", config, localSlot: 1, record },
+      ...readiness.map(message => ({ kind: "message", message })),
+      ...transcript.packets.map(packet => ({ kind: "message", message: { type: "INPUT", context, packet } })),
+    ] };
+    const bundle = await evidenceModule.buildEvidenceBundle(archive, record);
+    const trace = bundle.trace;
+    assert.equal(bundle.reconstruction.status, "complete");
+    assert.equal(trace.root, baseline.root);
+    const defense = await evidenceModule.loadEvidenceDefense(bundle, record);
+    const final = bundle.reconstruction.states.at(-1);
+    const stateForContract = { frame: final.frame, timer: final.timerFramesLeft, terminal: final.roundOver,
+      outcome: { P1: 1, P2: 2, TIE_BOTH_LOSE: 3 }[final.winner], p1: final.p1, p2: final.p2 };
+    assert.equal(await m.arena.hashTraceState(stateForContract), trace.terminalStateHash);
     assert.equal(trace.contextHash, (await m.arena.getChallenge(1)).matchContextHash);
     assert.equal(trace.genesisAuthorized, true);
     assert.equal(traceModule.verifyTraceOpening(trace.root, trace.contextHash, traceModule.openTrace(trace, 91)), true);
     assert.equal(trace.settlementEligible, false);
     const verifier = await (await ethers.getContractFactory("TraceCommitmentVerifier")).deploy();
     for (const index of [0, 1, 90, 91, 300]) {
-      const opening = traceModule.openTrace(trace, index);
+      const opening = defense.opening(index);
       assert.equal(await verifier.hashCheckpoint(opening.checkpoint), traceModule.hashCheckpoint(opening.checkpoint));
       assert.equal(await verifier.verifyOpening(trace.root, trace.contextHash, index, opening.checkpoint, opening.siblings), true);
       assert.equal(await verifier.verifyOpening(trace.root, ethers.id("other binding"), index, opening.checkpoint, opening.siblings), false);
