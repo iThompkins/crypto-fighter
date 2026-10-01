@@ -19,4 +19,4 @@
   106/106; `npm run test:contract` passed 51/51. Final
   `CHROMIUM_PATH=/usr/bin/chromium npm run check` passed the same suites plus
   5/5 Chromium tests. The existing production bundle-size warning remains.
-- Local commit: pending creation immediately after this audit update.
+- Local milestone commit: `f6c734b` (`feat: add neutral one-step trace adjudication`).

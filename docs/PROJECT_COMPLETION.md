@@ -80,7 +80,7 @@ verified. Phases A, B, and C remain complete. Funding and settlement are disable
 - `d758520` — Phase A fixed-point protocol v2 migration.
 - `3711a37` — Phase B authenticated live matches and durable evidence.
 - `d045537` — Phase C canonical dispute artifacts.
-- Phase D milestone commit: pending in this handoff until the local commit is created.
+- `f6c734b` — Phase D neutral one-step trace adjudication and witness integration.
 
 ## Exact reason the project is not settlement-complete
 
