@@ -1,3 +1,6 @@
+> Live dispute artifacts now use the [Phase C evidence-first pipeline](PHASE_C.md).
+> Transcript-only builders below remain diagnostic primitives; they cannot detect omitted evidence.
+
 > Current numeric status: Phase A v2 is documented in [FIXED_POINT_PROTOCOL.md](FIXED_POINT_PROTOCOL.md).
 > Earlier dated implementation notes below describe historical milestones.
 
@@ -23,12 +26,12 @@ Genesis registration, one-time session authorization, immutable escrow binding,
 context-authorized trace construction, an off-chain authenticated bisection
 coordinator, and compact Solidity Merkle membership verification are now
 implemented. See [GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md) for exact
-formats, chain authority, lifecycle and tested limits. On-chain trace claims
-and bisection turns/deadlines are implemented below.
+formats, chain authority, lifecycle and tested limits. On-chain trace claims,
+bisection turns/deadlines, and neutral one-step adjudication are implemented below.
 Phase A replaces the defective coordinate encoding with fixed-point v2.
-Minimal transition adjudication, authenticated recovery and trace settlement
-remain unimplemented. The sections below describe the design and implementation
-boundaries; they do not claim a complete settlement protocol.
+Authenticated non-response recovery and trace settlement remain unimplemented.
+The sections below describe the design and implementation boundaries; they do
+not claim a complete settlement protocol.
 
 ## Repository inspection and reuse
 
@@ -187,15 +190,15 @@ rebuilt output when importing a claim.
    key loss, cancellation and recovery before enabling funds. A commitment without
    a way for an honest opponent to retrieve dispute evidence is insufficient.
 
-## Next implementation boundary
+## Remaining implementation and policy boundary
 
 Genesis authorization helpers, trace claims and midpoint turns/deadlines are
 implemented. Phase A state-encoding migration and Phase B authenticated live
 lifecycle/input chains, reconnect, and durable public evidence are in place; see
 [Phase B](PHASE_B.md) for the exact trust and recovery boundaries.
-Single-transition adjudication, authenticated timeout resolution and settlement
-integration belong to later phases and must consume those Phase B guarantees. No full-transcript on-chain
-replay fallback is permitted. Replacement, equivocation, both-invalid and
+Single-transition adjudication now consumes those Phase B/C guarantees. No
+full-transcript on-chain replay fallback is permitted. Settlement integration,
+claim replacement, both-invalid consequences, availability failure, and
 non-response payout rules still require explicit decisions before settlement.
 
 ## On-chain turn implementation — 2026-09-17
@@ -219,3 +222,29 @@ reject a match once any trace claim exists, including an expired trace claim.
 This stage intentionally locks local test deposits pending adjudication/recovery;
 it is not a usable escrow lifecycle. Trace claims never transfer funds. Browser
 settlement and real-money deployment remain disabled.
+
+## Neutral one-step implementation — 2026-10-01
+
+`GameTransitionVerifier` independently implements the v2 integer transition,
+state bounds, ties-to-even collision separation, jump/gravity, cumulative attack
+damage, timer/KO outcome, and terminal absorption. It validates both packet
+signatures against the escrow-delegated session keys, exact match/slot/frame,
+self chains, F-2 acknowledgement chains, input masks, and canonical frame-head
+update. It returns the canonical state and checkpoint hashes for one step.
+
+The arena deploys this pure verifier as a separate immutable contract. That keeps
+`CryptoFighterArena` below the EIP-170 runtime limit without relaxing local EVM
+deployment checks. At an adjacent bracket, `adjudicateStep` reopens the agreed
+pre-checkpoint under the claimant root and both disputed post-checkpoints under
+their fixed roots. It authenticates the supplied pre-state, executes the step,
+and records `Claimant`, `Challenger`, or `Neither`. A terminal pre-state consumes
+no packet and must preserve the entire checkpoint. No verdict transfers funds,
+changes reputation, or certifies the rest of either trace.
+
+Objective signed invalid-input and same-slot/frame equivocation proofs are
+recorded separately from execution disagreement and have no automatic consequence.
+Participants may bind a root to the Phase C `journalHash`; this detects a changed
+retrieved archive but does not prove delivery. `src/onchain-dispute.ts` rebuilds
+independently authorized Phase C bundles and prepares exact claim, midpoint, and
+adjudication tuples. The browser exposes calldata preparation in developer mode
+and still sends no settlement transaction.

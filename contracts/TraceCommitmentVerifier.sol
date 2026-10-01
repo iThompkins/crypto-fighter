@@ -17,7 +17,7 @@ contract TraceCommitmentVerifier {
     bytes32 private constant LEAF_TAG = keccak256("CryptoFighter:fixed-point-trace-v2:leaf");
     bytes32 private constant NODE_TAG = keccak256("CryptoFighter:fixed-point-trace-v2:node");
 
-    function hashCheckpoint(Checkpoint calldata checkpoint) public pure returns (bytes32) {
+    function hashCheckpoint(Checkpoint memory checkpoint) public pure returns (bytes32) {
         return keccak256(abi.encode(CHECKPOINT_TAG, checkpoint));
     }
 

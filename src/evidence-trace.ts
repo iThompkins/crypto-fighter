@@ -47,6 +47,8 @@ export async function loadEvidenceDefense(value: unknown, authoritativeRecord?: 
   const packets = new Map(transcript.packets.map(p => [`${p.frame}:${p.player}`, p]));
   return {
     commitment: structuredClone(rebuilt.commitment),
+    journalHash: rebuilt.reconstruction.journalHash,
+    terminalState: structuredClone(states.at(-1)!),
     opening(index: number) { return openTrace(trace, index); },
     step(frame: number) {
       if (!Number.isSafeInteger(frame) || frame < 1 || frame > TRACE_LAST_INDEX) throw new Error("Invalid isolated step index");

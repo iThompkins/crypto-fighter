@@ -33,6 +33,10 @@ test("generated terminal replay agrees in browser and CLI; settlement stays disa
     await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
   }
   await developerMode(page);
+  await expect(page.getByRole("heading", { name: "Dispute witness preparation", exact: true })).toBeVisible();
+  for (const name of ["Prepare claim", "Prepare midpoint", "Prepare isolated step"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+  }
   await page.getByPlaceholder("Paste transcript JSON here...").fill(JSON.stringify(transcript));
   await page.getByRole("button", { name: "Verify + Load", exact: true }).click();
   await expect(page.getByText(/Verifier: ok/)).toBeVisible();

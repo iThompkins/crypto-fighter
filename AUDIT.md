@@ -403,3 +403,62 @@ Hardhat coverage separately verifies actual genesis activation. Build, lint, and
 `git diff --check` passed; the existing bundle-size warning remains. Independent
 read-only review findings were fixed and rechecked. Phase B is complete; later
 adjudication, availability, and escrow economics phases remain outside this work.
+
+### Phase C — canonical evidence reconstruction and defense exports, 2026-09-18
+
+The read-only integration audit found that transcript-selected trace construction
+could omit durable readiness, buffered dependencies, and late conflicts. The
+browser and new offline evidence CLI now reconstruct from the complete retained
+public journal. Every supplied signed variant is authenticated before execution;
+conflicts prevent branch selection, and missing dependencies, invalid chains,
+and over-horizon evidence have explicit non-certifying inspection outcomes.
+These outcomes assign no winner, fault penalty, or financial consequence.
+
+Canonical reconstruction derives executed inputs, transcript, states, terminal
+metadata, and the existing v2 trace. Versioned bundles retain source evidence,
+all checkpoints/tree levels, endpoint openings, and enough data to regenerate
+every bisection opening and isolated execution or terminal-absorption witness.
+Reload exports use durable rows rather than recovered UI state and never regain
+signing authority. Historical escrow inspection remains distinct from an
+independently verified activation record; practice cannot be promoted to escrow.
+
+The fixed-point codec, trace domains, 301-checkpoint horizon, and depth-nine tree
+remain unchanged. Contracts gain no new adjudication or payout behavior.
+Settlement remains disabled. External availability, withheld evidence, chain
+finality, claim replacement, one-step verification, and objective funded escape
+rules remain later-phase requirements. See docs/PHASE_C.md for the retention
+contract and the limits of recovery equivalence.
+
+Final Phase C validation: 105 Node tests, 43 contract tests, and 5 Chromium
+browser tests passed, including byte-identical browser/CLI exports and committed
+evidence reconstruction before/after reload. Lint, build, and `git diff --check`
+passed; the existing bundle-size warning remains. Independent read-only review
+found no remaining blockers after fixing over-horizon evidence export. Phase C
+is complete; settlement and payout remain disabled.
+
+### Phase D — neutral Solidity one-step adjudication, 2026-10-01
+
+The bisection dead end is closed without choosing economic consequences. A
+separately deployed immutable `GameTransitionVerifier` implements the canonical
+v2 state checks and transition. `TraceDispute.adjudicateStep` authenticates the
+agreed pre-state and both fixed-root post openings, verifies match/participants,
+frame, slot, signatures, input masks, self chains, F-2 acknowledgements and the
+frame chain, then records claimant/challenger/neither according to the computed
+checkpoint. Terminal absorption uses no fabricated packet.
+
+Phase C bundles now feed a strict contract-witness adapter. It requires an
+independently rebuilt authorization mode and validates roots, context, indices,
+openings and the agreed pre-checkpoint before emitting contract-shaped tuples.
+Developer-mode browser tools prepare claim, midpoint and isolated-step JSON but
+send no transaction. A participant can publish the exact retained journal hash
+for a root as an integrity commitment; the contract makes no availability claim.
+Signed invalid-input and equivocation evidence is recorded separately and has no
+penalty or payout effect.
+
+The arena runtime is 23,739 bytes and the rules verifier runtime is 7,995 bytes.
+Validation passed 106 Node tests and 51 contract tests, including independent
+transition vectors, 1,024 all-mask boundary comparisons, claimant/challenger/
+neither outcomes, first-frame and terminal-absorption boundaries, malformed
+proofs, wrong match/slot/frame, broken chains, invalid signatures, duplicates,
+direct faults and archive commitments. Settlement remains disabled pending the
+explicit policy decisions listed in `docs/PROJECT_COMPLETION.md`.

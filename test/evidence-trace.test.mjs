@@ -9,10 +9,11 @@ import { configHash, lifecycleDigest } from '../src/live-protocol.ts';
 import { LiveMatch } from '../src/live-match.ts';
 import { canonicalJson, reconstructEvidence } from '../src/evidence-archive.ts';
 import { buildEvidenceBundle, loadEvidenceDefense, verifyEvidenceBundle } from '../src/evidence-trace.ts';
-import { buildExecutionTrace, verifyTraceOpening } from '../src/execution-trace.ts';
+import { buildExecutionTrace, hashCheckpoint, verifyTraceOpening } from '../src/execution-trace.ts';
 import { hashPacketFields, ZERO32 } from '../src/crypto.ts';
 import { INPUT_DELAY, transition } from '../src/game.ts';
 import { hashTraceState } from '../src/protocol.ts';
+import { prepareTraceClaim, prepareTraceChallenge, prepareMidpointOpening, prepareAdjudicationWitness } from '../src/onchain-dispute.ts';
 
 const directory = await mkdtemp(join(tmpdir(), 'crypto-fighter-evidence-'));
 const sourceFile = join(directory, 'source.json');
@@ -135,6 +136,36 @@ test('mode-bound readiness prevents practice promotion; historical authority is 
   await assert.rejects(buildEvidenceBundle(a, { ...record, authorized: false }), /Independent/);
   a.journal[1] = original.journal[1];
   await assert.rejects(buildEvidenceBundle(a), /domain/);
+});
+test('independently authorized bundles produce contract-shaped claim, midpoint and step witnesses', async () => {
+  const trusted = await buildEvidenceBundle(archive('escrow'), record);
+  const historical = await buildEvidenceBundle(archive('escrow'));
+  const claim = await prepareTraceClaim(trusted, record);
+  const challenge = await prepareTraceChallenge(trusted, record);
+  const midpoint = await prepareMidpointOpening(trusted, 45, record);
+  assert.equal(claim.root, trusted.trace.root);
+  assert.deepEqual(claim.genesis.checkpoint, trusted.trace.checkpoints[0]);
+  assert.equal(claim.genesis.siblings.length, 9);
+  assert.equal(claim.endpoint.checkpoint.stateHash, trusted.trace.checkpoints[300].stateHash);
+  assert.equal(claim.terminalState.frame, trusted.trace.terminalFrame);
+  assert.equal(claim.archivePublication.journalHash, trusted.reconstruction.journalHash);
+  assert.equal(challenge.root, claim.root);
+  assert.equal(midpoint.index, 45);
+  assert.equal(midpoint.opening.siblings.length, 9);
+  const defense = await loadEvidenceDefense(trusted, record);
+  const comparison = { contextHash:trusted.trace.contextHash, claimantRoot:trusted.trace.root, challengerRoot:trusted.trace.root,
+    claimantBefore:defense.opening(0), claimantAfter:defense.opening(1), challengerAfter:defense.opening(1) };
+  const witness = await prepareAdjudicationWitness(trusted, 1, comparison, record);
+  assert.equal(witness.expectedVerdict, 'claimant');
+  assert.equal(witness.beforeState.frame, 0);
+  assert.equal(witness.p1.signature, source.packets[0].signature);
+  assert.equal(witness.canonicalPost, hashCheckpoint(trusted.trace.checkpoints[1]));
+  for (const rejected of [
+    () => prepareTraceClaim(historical, record),
+    () => prepareTraceClaim(trusted),
+    () => prepareAdjudicationWitness(trusted, 1, {...comparison, contextHash:ZERO32}, record),
+    () => { const bad=structuredClone(comparison); bad.claimantAfter.siblings.pop(); return prepareAdjudicationWitness(trusted,1,bad,record); },
+  ]) await assert.rejects(rejected(), /record|context|opening/i);
 });
 test('defense package regenerates every opening and execution/absorbing step without peer or UI', async () => {
   const defense = await loadEvidenceDefense(baseline);

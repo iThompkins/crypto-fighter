@@ -128,19 +128,6 @@ contract CryptoFighterArena is TraceDispute {
         _safeTransfer(c.p2, refund);
     }
 
-    /// @notice A per-frame input packet signed by a player's session key.
-    /// @dev Digest matches the client/verifier exactly:
-    ///      keccak256(abi.encode(matchId, frame, player, inputMask, prevSelfHash, prevOppHash)).
-    struct SignedPacket {
-        bytes32 matchId;
-        uint256 frame;
-        uint256 player;
-        uint256 inputMask;
-        bytes32 prevSelfHash;
-        bytes32 prevOppHash;
-        bytes signature;
-    }
-
     struct PlayerStats {
         uint64 matchesCreated;
         uint64 matchesJoined;
@@ -159,7 +146,6 @@ contract CryptoFighterArena is TraceDispute {
     }
 
     uint64 public constant MIN_RESPONSE_WINDOW_SECONDS = 24 hours;
-    uint256 internal constant KNOWN_INPUT_MASK = 0x0f;
 
     uint256 public nextChallengeId = 1;
     mapping(uint256 => Challenge) internal challenges;
@@ -459,33 +445,6 @@ contract CryptoFighterArena is TraceDispute {
         _finalize(challengeId, msg.sender == c.p1 ? Outcome.P1 : Outcome.P2);
     }
 
-    /// @dev Packet digest, byte-identical to the client and off-chain verifier.
-    function _packetDigest(SignedPacket calldata p) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(p.matchId, p.frame, p.player, p.inputMask, p.prevSelfHash, p.prevOppHash)
-        );
-    }
-
-    function _recoverPacket(SignedPacket calldata p) internal pure returns (address) {
-        return _recover(_packetDigest(p), p.signature);
-    }
-
-    /// @dev Recover the signer of a 65-byte (r||s||v) secp256k1 signature over `digest`.
-    function _recover(bytes32 digest, bytes memory sig) internal pure returns (address) {
-        require(sig.length == 65, "bad sig len");
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        assembly ("memory-safe") {
-            r := mload(add(sig, 32))
-            s := mload(add(sig, 64))
-            v := byte(0, mload(add(sig, 96)))
-        }
-        require(v == 27 || v == 28, "bad recovery id");
-        require(uint256(s) > 0 && uint256(s) <= 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0, "noncanonical signature");
-        return ecrecover(digest, v, r, s);
-    }
-
     /// @notice Start an on-chain timeout clock when the opponent stops continuing the packet chain.
     /// @dev The contract does not decide who was laggy. It asks whether the accused can continue
     ///      from the claimed transcript point before the deadline.
@@ -636,6 +595,12 @@ contract CryptoFighterArena is TraceDispute {
         require(genesisAuthorized[id], "genesis not authorized");
         require(c.resultClaimant == address(0) && c.timeoutDeadline == 0, "legacy claim active");
         return (c.p1, c.p2, c.matchContextHash, c.responseWindowSeconds);
+    }
+
+    function _traceEvidence(uint256 id) internal view override returns (bytes32, address, address) {
+        Challenge storage c = challenges[id];
+        require(c.status == MatchStatus.Active && genesisAuthorized[id], "inactive evidence context");
+        return (c.matchId, c.p1SessionKey, c.p2SessionKey);
     }
 
     function _safeTransfer(address payable to, uint256 amount) internal {

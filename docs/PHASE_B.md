@@ -147,9 +147,9 @@ Invalid recovered evidence is rejected. Exported copies remain useful backups.
 
 ## Later-phase assumptions
 
-Phase C/D/E must consume these authenticated evidence and ordering guarantees,
-finish minimal-step execution verification and dispute integration, resolve
-availability and result-replacement rules, and test objective exits from every
+Phase C/D consume these authenticated evidence and ordering guarantees; canonical
+reconstruction and neutral minimal-step execution are now implemented. Later work
+must resolve availability and result-replacement rules and test objective exits from every
 funded state before enabling settlement. Historical activation evidence does not
 replace fresh chain checks for any future settlement action. RPC trust/finality,
 chain reorganization handling, durable external availability, and escrow policy
@@ -164,3 +164,7 @@ the contract suite independently tests actual EVM genesis activation. The suite
 covers stale generations, duplicate/reordered/missing inputs, retransmission,
 late equivocation, interrupted commits, disconnect/reconnect, reload inspection,
 key loss, practice/escrow separation, and overlapping local preparation actions.
+
+Phase C adds the [canonical evidence-to-transcript-to-trace pipeline](PHASE_C.md).
+Browser transcript and saved-evidence exports now use committed journals directly;
+UI snapshots and recovered controller state do not select a trace branch.

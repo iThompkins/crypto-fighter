@@ -2,7 +2,7 @@
 
 Crypto Fighter is a React/TypeScript experiment in deterministic two-player fighting-game simulation, signed input transcripts, and optimistic native-token escrow. Two browser peers exchange secp256k1-signed inputs over PeerJS and independently advance the same cumulative state.
 
-> **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited settlement sketch. The contract cannot prove the claimed terminal state, and its continuation dispute is unsound with delayed pre-signed inputs. Do not use it with real funds. Browser settlement transactions are disabled. The deployment script permits only the in-process Hardhat network, and the contract constructor rejects chain IDs other than 31337. These are development restrictions, not a proof of settlement safety; a chain ID alone does not establish that funds are valueless.
+> **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited settlement sketch. The trace path can isolate and independently execute one disputed transition, but its neutral verdict has no payout effect. The legacy continuation and timeout payout paths remain unsound. Do not use it with real funds. Browser settlement transactions are disabled. The deployment script permits only the in-process Hardhat network, and the contract constructor rejects chain IDs other than 31337. These are development restrictions, not a proof of settlement safety; a chain ID alone does not establish that funds are valueless.
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
@@ -12,8 +12,9 @@ Phase A uses SCALE=256 integer geometry and nearest-midpoint rounding with ties
 to even. Transcript v2 requires the canonical rules fingerprint; final-state and
 trace hashes share one ABI codec. Development v1 replays are intentionally
 unsupported. See [the numeric specification and behavioral comparison](docs/FIXED_POINT_PROTOCOL.md).
-Existing trace formats/codecs are migrated, but one-step adjudication and trace
-payout/recovery remain unimplemented. Settlement stays disabled.
+Existing trace formats/codecs and the independent Solidity one-step rules engine
+use v2. Trace payout, non-response, and economic recovery remain unimplemented.
+Settlement stays disabled.
 
 ## Player flow
 
@@ -47,7 +48,10 @@ move signatures rely on that binding without repeating its fields. See
 [genesis authorization](docs/GENESIS_AUTHORIZATION.md) for the protocol and tested
 limits. The browser supports practice and explicitly loaded, independently verified
 escrow-authorized matches. Funding and production settlement remain disabled.
-See [Phase B lifecycle and persistence](docs/PHASE_B.md) for admission and recovery guarantees.
+See [Phase B lifecycle and persistence](docs/PHASE_B.md) for admission and recovery guarantees,
+and [Phase C evidence-to-trace integration](docs/PHASE_C.md) for canonical reconstruction
+and self-contained dispute artifacts. [Phase D](docs/PHASE_D.md) documents neutral
+one-step adjudication and the remaining policy boundary.
 
 ## Deterministic cumulative GameState
 
@@ -235,7 +239,7 @@ npm run verify-match -- path/to/prefix.json --allow-partial
 The browser offers the same opt-in checkbox. An internally valid nonterminal
 prefix can then return `ok: true`, but always `complete: false`. Default strict
 verification requires a terminal history. Every bare transcript result, including complete
-terminal replay, reports `settlementEligible: false`: a bare transcript does not establish authoritative genesis activation, and the contract does not verify execution.
+terminal replay, reports `settlementEligible: false`: a bare transcript does not establish authoritative genesis activation or complete dispute admission.
 This change does not authorize payouts or claim on-chain meaning for stateHash.
 
 ## Main wallets and session keys
@@ -289,7 +293,7 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 | rulesHash | Must equal the sole canonical version fingerprint |
 | Outcome, final frame, frame head, packet heads | Claimant supplied; minimal checks only |
 | Canonical chain/full transcript | Not checked |
-| Transition, HP, timer, terminality, winner | Not implemented on-chain |
+| Isolated trace transition, packet chains, HP/timer/terminal result | Independently recomputed by `GameTransitionVerifier`; no payout consequence |
 | Timeout hashes | Non-zero only; relationship/signatures trusted |
 | Genesis-to-escrow authority | Both session keys sign the frozen binding once; moves retain genesis-only context |
 
@@ -305,13 +309,19 @@ The prior README proposal is preserved and developed in
 [docs/EXECUTION_TRACE.md](docs/EXECUTION_TRACE.md), including the inspection findings,
 encoding, dispute invariants, availability requirements, and remaining work.
 
-Implemented now: experimental off-chain trace construction from a strictly
+Implemented now: evidence-first trace construction from a strictly
 verified terminal transcript, canonical ABI integer-state encoding, ordered Merkle trees,
-and bounded checkpoint membership proofs. Phase A fixed-point migration resolves
-the former quarter-unit encoding blocker. One-step adjudication is still pending.
+bounded checkpoint membership proofs, interactive bisection, and independent
+Solidity execution of the isolated transition. Phase A fixed-point migration resolves
+the former quarter-unit encoding blocker.
 [Phase B status and policy boundaries](docs/PHASE_B.md) document the authenticated
 live authentication, durable evidence, and reload/reconnect behavior.
 Authenticated but unexecuted delayed inputs cannot alter the root. Browser and CLI use the same implementation.
+
+The transcript-only commands below are diagnostic codec tools. Live dispute
+artifacts use the journal-first `npm run evidence-trace -- build archive.json`
+pipeline; [Phase C](docs/PHASE_C.md) documents completeness, conflict rejection,
+recovery equivalence, and every retained artifact.
 
 ~~~bash
 npm run make-transcript -- /tmp/terminal.json
@@ -328,8 +338,9 @@ the diagnostic CLI does not establish authoritative genesis activation and every
 Now implemented in addition: immutable escrow-bound genesis authorization,
 authorized trace roots, an off-chain authenticated bisection coordinator, and
 compact Solidity Merkle membership verification. On-chain root claims and interactive bisection turns/deadlines are also implemented
-(see the execution-trace document). One-step adjudication, authenticated timeout
-resolution and availability recovery remain pending. Trace claims block all legacy
+(see the execution-trace document). Adjacent disputes now end in a neutral
+claimant/challenger/neither execution verdict. Authenticated non-response resolution,
+availability enforcement, and economic recovery remain pending. Trace claims block all legacy
 settlement paths and currently have no payout/recovery entry point. The existing continuation-packet dispute conflicts with this design and
 must eventually be replaced. No full-transcript on-chain replay fallback is planned.
 
@@ -339,9 +350,10 @@ must eventually be replaced. No full-transcript on-chain replay fallback is plan
 - Wrong outcome at the true final frame cannot be disproved by continuation.
 - Pre-signed delayed inputs can falsely satisfy continuation after round end.
 - Unauthenticated timeout hashes can produce unjustified forfeits.
-- The canonical rules fingerprint is enforced, but outcome/trace claim fields remain trusted; Solidity has no game verifier.
+- The canonical rules fingerprint and one isolated step are enforced, but an
+  unchallenged claim and verdict consequence still require approved settlement policy.
 - Moves intentionally sign only genesis context; authorized use requires the one-time
-  registered binding. The practice UI does not yet integrate this lifecycle.
+  registered binding.
 - Solidity and browser signature recovery enforce low-S and v=27/28.
 - PeerJS/browser memory are not hardened custody, privacy, availability, or DoS systems; reset/reload loses keys.
 - Input delay permits limited lookahead; commit-reveal is only proposed.
@@ -354,7 +366,7 @@ must eventually be replaced. No full-transcript on-chain replay fallback is plan
 
 1. **Freeze off-chain specification:** versioned encoding/schema, canonical-version agreement, mask bounds, golden vectors, and browser/CLI parity tests.
 2. **Authenticate execution:** co-signed canonical receipts or commit-reveal plus execution acknowledgements; remove delay ambiguity.
-3. **Build proof primitives:** canonical state, trace leaves, Merkle proofs, bisection, one-step verifier, and availability rules.
+3. **Build proof primitives:** canonical state, trace leaves, Merkle proofs, bisection, and one-step verifier are implemented; availability enforcement remains.
 4. **Replace timeout scaffolding:** authenticated relationships and adversarial deadline/stall/non-response tests.
 5. **Harden escrow:** threat model, fuzz/invariant testing, audit, domain/signature hardening, complete UI, monitoring/recovery.
 6. **Only then consider other assets:** ERC-20/stablecoins require explicit accounting, safe transfers, denomination policy, and separate review.
@@ -459,13 +471,17 @@ used a different protocol and must not be treated as contract validation. Use
 
 ~~~text
 contracts/CryptoFighterArena.sol  native escrow/result/timeout prototype
+contracts/GameTransitionVerifier.sol independent canonical one-step rules
+contracts/TraceDispute.sol        root claim, bisection, neutral adjudication
 hh/test/settlement.cjs            local contract tests
+hh/test/step-adjudication.cjs     Phase C-to-Solidity adversarial tests
 test/browser/gameplay.spec.mjs   local browser gameplay/replay checks
 tools/verify-match.mjs            CLI adapter for shared transcript verifier
 src/App.tsx                       UI, PeerJS, realtime validation
 src/chain.ts                     injected wallet and minimal Arena ABI
 src/crypto.ts                    keys, signatures, and hashes
 src/game.ts                      deterministic transition
+src/onchain-dispute.ts           verified Phase C-to-contract witness adapter
 src/types.ts                     shared protocol types
 src/verifier.ts                  browser verifier/replayer
 ~~~

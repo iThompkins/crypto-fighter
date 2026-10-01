@@ -12,6 +12,7 @@ import { LiveMatch, configHash, hex, object, verifyReady, type LiveConfig } from
 import { BrowserEvidenceStore } from "./evidence-store";
 import { reconstructEvidence, canonicalJson, type EvidenceArchive } from "./evidence-archive";
 import { buildEvidenceBundle } from "./evidence-trace";
+import { prepareAdjudicationWitness, prepareMidpointOpening, prepareTraceClaim, type AdjudicationComparison } from "./onchain-dispute";
 import { hello, verifyHello } from "./live-discovery";
 import { createGenesisSession, hashGenesisBinding, verifyGenesisConsent, readGenesisRecord, type GenesisAuthorization, type GenesisRecord } from "./genesis";
 import type { CanonicalFrame, GameState, MatchTranscript, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
@@ -97,6 +98,10 @@ export default function App() {
   const genesisSessionRef = useRef<ReturnType<typeof createGenesisSession> | null>(null);
   const escrowRef = useRef<{ config: LiveConfig; record: GenesisRecord } | null>(null);
   const [authorizationInput, setAuthorizationInput] = useState("");
+  const [disputeBundleInput, setDisputeBundleInput] = useState("");
+  const [disputeComparisonInput, setDisputeComparisonInput] = useState("");
+  const [disputeFrame, setDisputeFrame] = useState("1");
+  const [disputeWitnessOutput, setDisputeWitnessOutput] = useState("");
   const [liveStatus, setLiveStatus] = useState("practice discovery");
   const [savedContexts, setSavedContexts] = useState<string[]>([]);
   const retryRef = useRef(0);
@@ -769,6 +774,38 @@ export default function App() {
     } catch (error) { setLastError(String(error)); }
   }
 
+  async function exportTraceClaimWitness() {
+    try {
+      const live = liveRef.current, escrow = escrowRef.current;
+      if (!live || !escrow) throw new Error("Load an activated escrow match before preparing a trace claim.");
+      const bundle = await buildEvidenceBundle(await live.exportEvidence(), escrow.record);
+      const witness = await prepareTraceClaim(bundle, escrow.record);
+      downloadText(`trace-claim-${bundle.reconstruction.context.slice(2, 10)}.json`, canonicalJson(witness));
+      log("Exported an independently authorized trace-claim witness; settlement remains disabled.");
+    } catch (error) { setLastError(String(error)); }
+  }
+
+  async function prepareDisputeWitness(kind: "claim" | "midpoint" | "step") {
+    try {
+      const escrow = escrowRef.current;
+      if (!escrow) throw new Error("Load a freshly verified activated escrow record first.");
+      let archive: unknown;
+      if (disputeBundleInput.trim()) {
+        const supplied = JSON.parse(disputeBundleInput) as { archive?: unknown };
+        archive = supplied.archive ?? supplied;
+      } else {
+        if (!liveRef.current) throw new Error("Paste an evidence bundle or keep the live match open.");
+        archive = await liveRef.current.exportEvidence();
+      }
+      const bundle = await buildEvidenceBundle(archive, escrow.record);
+      const frame = Number(disputeFrame);
+      const result = kind === "claim" ? await prepareTraceClaim(bundle, escrow.record)
+        : kind === "midpoint" ? await prepareMidpointOpening(bundle, frame, escrow.record)
+        : await prepareAdjudicationWitness(bundle, frame, JSON.parse(disputeComparisonInput) as AdjudicationComparison, escrow.record);
+      setDisputeWitnessOutput(canonicalJson(result));
+    } catch (error) { setLastError(String(error)); }
+  }
+
   const finalSettlementPayload = useMemo(() => {
     if (!state.roundOver || !finalStateHash) return "";
     return JSON.stringify(
@@ -1137,6 +1174,9 @@ export default function App() {
             <textarea aria-label="Genesis authorization" placeholder="Activated genesis authorization JSON" value={authorizationInput} onChange={event => setAuthorizationInput(event.target.value)} />
             <button style={styles.smallButton} onClick={() => void exportGenesisConsent()}>Export genesis consent</button>
             <button style={styles.smallButton} onClick={() => void loadEscrow()}>Load activated escrow match</button>
+            <button style={styles.smallButton} onClick={() => void exportTraceClaimWitness()} disabled={!state.roundOver || !escrowRef.current}>
+              Export trace-claim witness
+            </button>
             <div style={styles.row}>
               <input
                 style={styles.input}
@@ -1170,6 +1210,22 @@ export default function App() {
               </button>
             </div>
           </section>
+
+          {devMode && (
+          <section style={styles.panel}>
+            <h2 style={styles.h2}>Dispute witness preparation</h2>
+            <div style={styles.sub}>Uses a freshly loaded escrow record and rebuilds supplied Phase C evidence. It prepares calldata only and sends no transaction.</div>
+            <textarea aria-label="Phase C dispute bundle" style={styles.textarea} value={disputeBundleInput} onChange={event => setDisputeBundleInput(event.target.value)} placeholder="Phase C bundle JSON (optional while live match is open)" />
+            <input style={styles.input} value={disputeFrame} onChange={event => setDisputeFrame(event.target.value)} placeholder="Midpoint or isolated frame" />
+            <textarea aria-label="Adjudication comparison" style={styles.textarea} value={disputeComparisonInput} onChange={event => setDisputeComparisonInput(event.target.value)} placeholder="Committed roots and claimant/challenger openings for an isolated step" />
+            <div style={styles.row}>
+              <button style={styles.smallButton} onClick={() => void prepareDisputeWitness("claim")}>Prepare claim</button>
+              <button style={styles.smallButton} onClick={() => void prepareDisputeWitness("midpoint")}>Prepare midpoint</button>
+              <button style={styles.smallButton} onClick={() => void prepareDisputeWitness("step")}>Prepare isolated step</button>
+            </div>
+            <pre style={styles.pre}>{disputeWitnessOutput || "No witness prepared."}</pre>
+          </section>
+          )}
 
           {devMode && (
           <section style={styles.panel}>
