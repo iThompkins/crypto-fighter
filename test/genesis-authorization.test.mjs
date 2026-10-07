@@ -51,4 +51,3 @@ test("binding validation rejects noncanonical identifiers, rules and numeric enc
     assert.throws(() => hashGenesisBinding({ ...binding, ...changes }));
   }
 });
-
