@@ -6,7 +6,16 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'hh/.hhartifacts', 'hh/.hhcache', '.cache', 'test-results', 'playwright-report']),
+  {
+    files: ['**/*.{js,mjs,cjs}'],
+    extends: [js.configs.recommended],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
+    files: ['hh/test/**/*.cjs'],
+    languageOptions: { globals: globals.mocha },
+  },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
