@@ -4,6 +4,11 @@ Crypto Fighter is a React/TypeScript experiment in deterministic two-player figh
 
 > **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited settlement sketch. The trace path can isolate and independently execute one disputed transition, but its neutral verdict has no payout effect. The legacy continuation and timeout payout paths remain unsound. Do not use it with real funds. Browser settlement transactions are disabled. The deployment script permits only the in-process Hardhat network, and the contract constructor rejects chain IDs other than 31337. These are development restrictions, not a proof of settlement safety; a chain ID alone does not establish that funds are valueless.
 
+Returning after time away? Start with the concise
+[project map](docs/PROJECT_MAP.md), then use its linked
+[invariants](docs/INVARIANTS.md), [roadmap](docs/ROADMAP.md), and
+[decision log](docs/DECISIONS.md) to distinguish current facts from open policy.
+
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
 ## Fixed-point protocol v2
