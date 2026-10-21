@@ -1,79 +1,14 @@
-# Near-term roadmap
+# Roadmap
 
-This is the small initial backlog after the Phase D milestone. It sequences the
-known specification work; it is not a comprehensive feature plan and does not
-authorize implementation.
+Today, local gameplay, durable evidence, trace construction, bisection, and
+neutral one-step adjudication are implemented. Settlement is not safe or enabled.
 
-## Current baseline
+Next:
 
-| Layer | Current state | Primary reference |
-| --- | --- | --- |
-| Game | Fixed-point protocol v2 and deterministic replay complete | [FIXED_POINT_PROTOCOL.md](FIXED_POINT_PROTOCOL.md) |
-| Evidence | Authenticated live journal and canonical dispute bundles complete locally | [PHASE_B.md](PHASE_B.md), [PHASE_C.md](PHASE_C.md) |
-| Dispute | Fixed-root bisection and neutral one-step adjudication complete locally | [PHASE_D.md](PHASE_D.md) |
-| Settlement | Policy, non-response, availability, and funded exits unresolved; disabled | [PROJECT_COMPLETION.md](PROJECT_COMPLETION.md) |
+1. **Remove legacy ambiguity ([Issue #6](https://github.com/iThompkins/crypto-fighter/issues/6)).** Clearly isolate the old result/timeout payout code and the temporary pre-join `matchContextHash`.
+2. **Define evidence and chain assumptions ([Issue #5](https://github.com/iThompkins/crypto-fighter/issues/5)).** Decide how missing archives, withholding, RPC trust, confirmations, and reorgs are handled.
+3. **Design safe settlement ([Issue #4](https://github.com/iThompkins/crypto-fighter/issues/4)).** Define payouts, refunds, non-response, `neither` verdicts, and an objective exit from every funded state.
+4. **Implement and audit only after those rules are approved.** Keep browser settlement disabled and deployment local until adversarial tests and external review support enabling it.
 
-## Initial backlog and dependencies
-
-```mermaid
-flowchart TD
-    I3["#3 Project map, invariants, roadmap, decisions"]
-    I6["#6 Isolate legacy protocol/API ambiguity"]
-    I5["#5 Evidence availability and chain trust"]
-    I4["#4 Safe settlement and funded-state exits"]
-
-    I3 --> I6
-    I3 --> I5
-    I3 --> I4
-    I6 --> I5
-    I6 --> I4
-    I5 -. policy input .-> I4
-```
-
-1. **[#3 Establish project map, invariants, roadmap, and decision log](https://github.com/iThompkins/crypto-fighter/issues/3)**
-   creates the shared vocabulary and orientation layer. Completion means the four
-   concise documents exist and point to authoritative sources without rewriting
-   them.
-2. **[#6 Isolate legacy protocol/API ambiguity](https://github.com/iThompkins/crypto-fighter/issues/6)**
-   classifies legacy versus current trace paths, clarifies provisional versus
-   finalized `matchContextHash`, and identifies misleading historical names. This
-   should establish terminology before settlement behavior is specified.
-3. **[#5 Specify evidence availability and chain trust assumptions](https://github.com/iThompkins/crypto-fighter/issues/5)**
-   defines archive loss/withholding, evidence required to dispute, RPC trust,
-   confirmations/finality, and reorg handling. Its failure categories are inputs
-   to settlement semantics.
-4. **[#4 Specify safe settlement and funded-state exit semantics](https://github.com/iThompkins/crypto-fighter/issues/4)**
-   maps claimant/challenger/neither, non-response, both-invalid traces, and
-   timeouts to objective exits for every funded state. It consumes the terminology
-   and trust assumptions above. Specification comes before implementation.
-
-Issues #4 and #5 may be drafted in parallel after the shared vocabulary exists,
-but they must agree on how unavailable evidence differs from invalid evidence and
-non-response. Issue #6 prevents either document from accidentally treating a
-legacy payout path as current protocol.
-
-## Settlement-enablement blockers
-
-The project remains local-only until later, separately approved work implements
-and validates all of the following:
-
-- an approved economic meaning for unchallenged claims and each neutral verdict;
-- authenticated non-response handling and an eventual exit from every funded state;
-- evidence delivery/availability rules and recovery when archives are lost or withheld;
-- chain finality, confirmation, RPC trust, and reorg behavior;
-- claim replacement/repetition, both-invalid, and direct-fault consequences;
-- removal or isolation of unsafe legacy settlement paths;
-- adversarial, invariant, browser, and contract validation of the chosen policy;
-- external security review before relaxing local-chain or real-fund containment.
-
-## Deliberately outside the initial backlog
-
-- Public-chain deployment or real-money operation.
-- ERC-20/stablecoin support, fees, token economics, or governance.
-- Reputation, matchmaking penalties, or behavioral scoring.
-- Broad UI redesign or settlement transaction UX.
-- Exhaustive API/file documentation or historical rewrite.
-- Gameplay, fixed-point, trace-format, or combat-balance changes.
-
-Add work here only when it changes near-term sequencing or blocks a funded-safety
-decision. Detailed implementation task lists belong in their issue or PR.
+Public-chain deployment, real funds, token economics, reputation, and broad UI
+work are not current roadmap items.

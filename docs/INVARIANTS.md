@@ -1,149 +1,203 @@
 # Project invariants
 
-These are review gates, not aspirations. A change that intentionally alters one
-must update its specification, tests, protocol/version consequences, and the
-[decision log](DECISIONS.md) in the same review.
+These are review rules for the system that exists today. If a change deliberately
+breaks one, update the relevant specification, tests, versioning consequences,
+and [decision log](DECISIONS.md) in the same review.
 
-## Game and identity
+## INV-01 — One game version defines every match
 
-### INV-01 — One canonical game version
+**Rule —** A match uses the one compiled ruleset and fingerprint. Players cannot
+negotiate different damage, movement, timer, or state encoding.
 
-There is one compiled ruleset and one canonical fingerprint at a time. Match
-creation cannot negotiate damage, physics, timer, or state encoding. Transcript
-metadata describes that version; it does not configure simulation.
+**Why —** If rules were configurable or only descriptive, two honest programs
+could accept the same match while calculating different states.
 
-Review in: [`src/protocol.ts`](../src/protocol.ts),
-[`src/game.ts`](../src/game.ts), and canonical-protocol/contract tests.
+**Enforced by —** [`src/protocol.ts`](../src/protocol.ts),
+[`src/game.ts`](../src/game.ts),
+[`test/canonical-protocol.test.mjs`](../test/canonical-protocol.test.mjs), and
+[`hh/test/canonical-rules.cjs`](../hh/test/canonical-rules.cjs).
 
-### INV-02 — One deterministic cumulative transition
+## INV-02 — The same state and inputs always produce the same next state
 
-For a valid pre-state and two masks in `0..15`, `transition` determines the only
-next state. Browser replay, CLI replay, trace construction, and Solidity one-step
-execution must agree on its encoded state hash. A terminal state is absorbing and
-consumes no later packet.
+**Rule —** For a valid state and two input masks from 0 to 15, there is exactly
+one next state. Browser replay, trace construction, and Solidity must agree on
+its encoded hash. Once a match ends, later trace positions repeat the final state
+without consuming more inputs.
 
-Review in: [`src/game.ts`](../src/game.ts),
+**Why —** A dispute cannot be resolved if different components calculate
+different movement, damage, clocks, or end states.
+
+**Enforced by —** [`src/game.ts`](../src/game.ts),
 [`src/protocol.ts`](../src/protocol.ts),
 [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol),
-and fixed-point/step-adjudication tests.
+[`test/fixed-point.test.mjs`](../test/fixed-point.test.mjs), and
+[`hh/test/fixed-point-codec.cjs`](../hh/test/fixed-point-codec.cjs).
 
-### INV-03 — Packet signatures prove input authorship, not execution
+## INV-03 — A packet signature proves authorship, not execution
 
-Each input binds match ID, frame, slot, mask, self-chain head, and delayed opponent
-head. Only an admitted contiguous P1/P2 pair advances the game. A valid delayed or
-future packet can remain unexecuted and must not be treated as result proof.
+**Rule —** An input packet binds its match, frame, player, input, previous own
+packet, and older opponent packet. Only the next valid Player 1/Player 2 pair
+advances play. A valid packet signed ahead of time is not proof that its frame ran.
 
-Review in: [`src/crypto.ts`](../src/crypto.ts),
-[`src/live-match.ts`](../src/live-match.ts), and transcript/live-match tests.
+**Why —** Treating any signed future packet as executed would allow delayed or
+unused inputs to manufacture a result or overturn a real one.
 
-### INV-04 — Genesis carries escrow authority once
+**Enforced by —** [`src/crypto.ts`](../src/crypto.ts),
+[`src/live-match.ts`](../src/live-match.ts),
+[`test/live-match.test.mjs`](../test/live-match.test.mjs), and
+[`test/transcript-integrity.test.mjs`](../test/transcript-integrity.test.mjs).
 
-Moves remain compact and genesis-bound. Escrow authority comes from one immutable
-chain/arena/challenge/participants/sessions/rules/terms binding authorized by both
-session keys. A random match ID or self-declared record is not authority.
+## INV-04 — Both session keys authorize one completed match binding
 
-Review in: [`src/genesis.ts`](../src/genesis.ts),
-[`contracts/CryptoFighterArena.sol`](../contracts/CryptoFighterArena.sol), and
-[GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md).
+**Rule —** The short match ID gains escrow meaning only through one immutable
+`GenesisBinding` containing the chain, arena, challenge, players, sessions, rules,
+and terms. Both session keys must approve the completed binding.
 
-## Evidence
+**Why —** A random match ID or self-declared file must not be able to attach
+ordinary practice inputs to a funded match after the fact.
 
-### INV-05 — Durable commit precedes authority
+**Enforced by —** [`src/genesis.ts`](../src/genesis.ts),
+[`contracts/CryptoFighterArena.sol`](../contracts/CryptoFighterArena.sol),
+[`test/genesis-authorization.test.mjs`](../test/genesis-authorization.test.mjs),
+and [`hh/test/genesis.cjs`](../hh/test/genesis.cjs).
 
-Outgoing public statements commit before send. Incoming statements commit before
-simulation use, acknowledgement, or dependent signing. A failed durable write
-stops authority rather than silently continuing. Session private keys are never
-persisted or restored.
+## INV-05 — Persistent storage completes before a message gains authority
 
-Review in: [`src/live-match.ts`](../src/live-match.ts),
-[`src/evidence-store.ts`](../src/evidence-store.ts), and browser recovery tests.
+**Rule —** An outgoing public statement is saved before it is sent. An incoming
+statement is saved before it is acknowledged, used in the simulation, or used to
+sign a dependent packet. Failed storage stops play. Session private keys are
+never persisted or restored.
 
-### INV-06 — Reconstruction uses the whole retained journal
+**Why —** Otherwise a crash or reload could erase the evidence for an action the
+peer already relied on, or restore signing power that should have disappeared.
 
-Canonical evidence output is derived from all supplied authenticated READY/input
-facts, independent of journal row order, duplicates, local observations, or UI
-state. A conflicting signed payload is retained and prevents branch selection;
-missing or invalid dependencies produce a non-certifying status.
+**Enforced by —** [`src/live-match.ts`](../src/live-match.ts),
+[`src/evidence-store.ts`](../src/evidence-store.ts),
+[`test/live-match.test.mjs`](../test/live-match.test.mjs), and
+[`test/browser/live-evidence.spec.mjs`](../test/browser/live-evidence.spec.mjs).
 
-Review in: [`src/evidence-archive.ts`](../src/evidence-archive.ts),
-[`src/evidence-trace.ts`](../src/evidence-trace.ts), and evidence-trace tests.
+## INV-06 — Reconstruction examines the entire supplied journal
 
-### INV-07 — Authority modes never collapse
+**Rule —** Derived transcripts and traces come from all supplied authenticated
+READY and input facts, regardless of row order, duplicates, UI state, or which
+browser saved them. Conflicting signed packets prevent selection of either branch;
+missing or broken dependencies remain visible.
 
-Practice, historical inspection, and independently verified escrow authority are
-different modes. A file, flag, embedded chain record, or diagnostic trace cannot
-be relabeled into authoritative settlement evidence. All current artifacts remain
+**Why —** A participant must not be able to hide inconvenient signed evidence by
+exporting only the branch that supports its claim.
+
+**Enforced by —** [`src/evidence-archive.ts`](../src/evidence-archive.ts),
+[`src/evidence-trace.ts`](../src/evidence-trace.ts), and
+[`test/evidence-trace.test.mjs`](../test/evidence-trace.test.mjs).
+
+## INV-07 — Practice evidence cannot become funded-match evidence
+
+**Rule —** Practice artifacts, saved historical records, and a freshly verified
+authorized arena record remain distinct. A flag or imported file cannot promote
+one category into another. Every current artifact still states
 `settlementEligible: false`.
 
-Review in: [`src/genesis.ts`](../src/genesis.ts),
-[`src/evidence-trace.ts`](../src/evidence-trace.ts), and authorized-trace tests.
+**Why —** Otherwise a self-authored or stale file could claim the authority of a
+live funded match without proving the arena actually authorized it.
 
-### INV-08 — Liveness observations do not assign blame
+**Enforced by —** [`src/genesis.ts`](../src/genesis.ts),
+[`src/evidence-trace.ts`](../src/evidence-trace.ts),
+[`src/onchain-dispute.ts`](../src/onchain-dispute.ts), and
+[`test/authorized-trace.test.mjs`](../test/authorized-trace.test.mjs).
 
-Disconnects, missing packets, storage failures, retries, and local timestamps do
-not prove cheating or a winner. Objective signed faults, liveness failures, and
-product/reputation concerns remain separate categories.
+## INV-08 — Disconnects and missing messages do not prove a cheater or winner
 
-Review in: [PHASE_B.md](PHASE_B.md), live-match status transitions, and conflict/
-reconnect tests.
+**Rule —** Local timestamps, disconnects, missing packets, retries, and storage
+failures may stop progress, but they do not by themselves assign fault or choose
+a winner.
 
-## Dispute
+**Why —** Either peer, the network, storage, or the application could cause the
+same observation. Turning it directly into punishment would let unreliable local
+conditions decide money.
 
-### INV-09 — Trace commitments are fixed, bounded, and context-bound
+**Enforced by —** [`src/live-match.ts`](../src/live-match.ts),
+[`src/match-evidence.ts`](../src/match-evidence.ts),
+[`test/match-evidence.test.mjs`](../test/match-evidence.test.mjs), and
+[`test/browser/live-evidence.spec.mjs`](../test/browser/live-evidence.spec.mjs).
 
-An authorized trace uses checkpoints `0..300`, a depth-nine ordered Merkle tree,
-and the immutable genesis binding hash as context. Once a claim/challenge begins,
-roots and context do not change. Membership proves inclusion only, not correctness.
+## INV-09 — A trace is fixed, bounded, and tied to one match binding
 
-Review in: [`src/execution-trace.ts`](../src/execution-trace.ts),
+**Rule —** An authorized trace contains checkpoints 0 through 300 and commits
+them under the completed `GenesisBinding` hash. Submitted roots and their match
+context do not change during a dispute. A Merkle proof shows membership only; it
+does not show that a checkpoint is correct.
+
+**Why —** Changing the root, range, or match halfway through comparison would
+make midpoint answers meaningless, while treating membership as truth would skip
+actual game-rule verification.
+
+**Enforced by —** [`src/execution-trace.ts`](../src/execution-trace.ts),
 [`contracts/TraceCommitmentVerifier.sol`](../contracts/TraceCommitmentVerifier.sol),
-and execution-trace/trace-dispute tests.
+[`test/execution-trace.test.mjs`](../test/execution-trace.test.mjs), and
+[`hh/test/trace-dispute.cjs`](../hh/test/trace-dispute.cjs).
 
-### INV-10 — Bisection preserves an equal low and unequal high
+## INV-10 — Each bisection round preserves the boundary of the disagreement
 
-Both fixed roots must open the selected midpoint before the bracket moves. Invalid,
-duplicate, stale, or late openings do not advance the bracket or restart its clock.
-Adjacency is reached within nine rounds for the fixed horizon.
+**Rule —** Both players must prove their checkpoint at the same midpoint before
+the range moves. After each round, the lower checkpoint is one they agree on and
+the upper checkpoint is one they disagree on. Invalid, duplicate, stale, or late
+answers do not move the range or restart its clock.
 
-Review in: [`src/bisection.ts`](../src/bisection.ts),
-[`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol), and trace-dispute tests.
+**Why —** Without these rules, one player could steer the search away from the
+first disputed transition or extend the dispute indefinitely.
 
-### INV-11 — One-step adjudication is narrow and neutral
-
-Adjudication authenticates the agreed pre-state, exact frame/slots, both packet
-signatures, mask bounds, self/F-2 acknowledgement/frame chains, and both post
-openings before executing one transition. It records claimant, challenger, or
-neither. It does not certify an entire trace, change reputation, or move funds.
-
-Review in: [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol),
+**Enforced by —** [`src/bisection.ts`](../src/bisection.ts),
 [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol),
-[`src/onchain-dispute.ts`](../src/onchain-dispute.ts), and step-adjudication tests.
+[`test/authorized-trace.test.mjs`](../test/authorized-trace.test.mjs), and
+[`hh/test/trace-dispute.cjs`](../hh/test/trace-dispute.cjs).
 
-### INV-12 — Full transcripts stay off-chain
+## INV-11 — One-step adjudication checks only the isolated step
 
-Solidity receives bounded roots, openings, states, packets, and one-step witnesses;
-it never receives or replays a complete match transcript as a fallback.
+**Rule —** Adjudication verifies the agreed pre-step state, exact frame and slots,
+both packet signatures, input bounds, packet-history links, and both proposed
+post-step checkpoints before running one transition. It records claimant,
+challenger, or neither; it does not validate every other trace step or move funds.
 
-Review in: [EXECUTION_TRACE.md](EXECUTION_TRACE.md), contract interfaces, and
-calldata-building tests.
+**Why —** A correct isolated step is enough to resolve that disagreement, but it
+cannot safely be stretched into proof of an entire trace or an economic policy.
 
-## Settlement containment
+**Enforced by —** [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol),
+[`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol),
+[`src/onchain-dispute.ts`](../src/onchain-dispute.ts), and
+[`hh/test/step-adjudication.cjs`](../hh/test/step-adjudication.cjs).
 
-### INV-13 — No current artifact authorizes real funds
+## INV-12 — Complete transcripts stay off-chain
 
-Browser settlement transactions are disabled, deployment is restricted to the
-in-process Hardhat chain, and neutral trace verdicts have no payout/recovery effect.
-Legacy result and timeout payout paths remain unsafe local-only scaffolding and
-must not be presented as the current trace protocol.
+**Rule —** Contracts receive roots, short Merkle proofs, states, packets, and one
+step witness. They never accept or replay a full match transcript as a fallback.
 
-Review in: [`src/App.tsx`](../src/App.tsx), [`src/chain.ts`](../src/chain.ts),
-deployment tests, settlement-disabled tests, and
-[PROJECT_COMPLETION.md](PROJECT_COMPLETION.md).
+**Why —** Full on-chain replay would discard the project's bounded-dispute model
+and make cost grow with match length.
 
-## Required property not yet achieved
+**Enforced by —** [`contracts/TraceCommitmentVerifier.sol`](../contracts/TraceCommitmentVerifier.sol),
+[`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol),
+[`src/onchain-dispute.ts`](../src/onchain-dispute.ts), and
+[`hh/test/step-adjudication.cjs`](../hh/test/step-adjudication.cjs).
 
-Every funded state must eventually have an objective exit that does not require
-cooperation from an absent participant. The current trace path does **not** satisfy
-this: missed responses and neutral verdicts can leave local test escrow locked.
-This is a blocker owned by Issues #4–#6, not a current invariant that the code can
-claim to preserve.
+## INV-13 — Current trace verdicts never authorize real funds
+
+**Rule —** Browser settlement actions remain disabled, deployment remains limited
+to the in-process Hardhat chain, and a trace verdict has no payout or refund
+effect. Legacy result and timeout functions are unsafe local scaffolding, not the
+trace settlement path.
+
+**Why —** The project still lacks economic rules, non-response handling, evidence
+availability guarantees, and an objective exit from every funded state.
+
+**Enforced by —** [`src/App.tsx`](../src/App.tsx),
+[`src/chain.ts`](../src/chain.ts),
+[`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol),
+[`test/settlement-disabled.test.mjs`](../test/settlement-disabled.test.mjs), and
+[`hh/test/deployment.cjs`](../hh/test/deployment.cjs).
+
+## Missing property
+
+Every funded state should eventually have a safe, objective exit even if one
+participant disappears. The current trace path does not provide that guarantee:
+silence and a `neither` verdict can leave local test escrow locked. This is future
+settlement work, not a property the current code can claim.
