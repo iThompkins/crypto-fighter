@@ -192,3 +192,40 @@ safe exit from every funded state have not been solved.
 Every funded state should eventually have a safe, objective exit, even if one
 player disappears. The current trace path does not provide that guarantee.
 Silence or a `Neither` verdict can leave local test escrow locked.
+
+## INV-14 — Evidence properties and failure states remain distinct
+
+**Rule:** Authenticity, integrity, availability, and canonical-chain inclusion
+are checked separately. Missing or withheld evidence is not relabeled invalid,
+and it cannot become a `Neither` execution verdict. Unavailable evidence,
+non-response, objective signed faults, and retryable chain uncertainty remain
+distinct inputs to future settlement policy.
+
+**Why it matters:** A signature or hash does not deliver its preimage, while
+failure to retrieve data does not prove that data false. Collapsing those states
+would let infrastructure failure assign value or blame.
+
+**Where it is specified/enforced:**
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md),
+[`src/evidence-archive.ts`](../src/evidence-archive.ts),
+[`src/evidence-trace.ts`](../src/evidence-trace.ts), and
+[`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol). External delivery
+and economic consequences are not yet enforced.
+
+## INV-15 — Tentative chain observations have no economic authority
+
+**Rule:** A single RPC response or an unfinalized block may support provisional
+display only. Escrow admission, dispute obligations, verdict reliance, and any
+future settlement require deployment-qualified canonical-chain confirmation;
+provider disagreement or a reorganization produces retryable uncertainty and a
+rollback/rebuild, never a default winner.
+
+**Why it matters:** Correct local verification against stale or noncanonical
+chain state is still unsafe. Reorged bindings, roots, deadlines, and verdicts
+cannot authorize irreversible effects.
+
+**Where it is specified/enforced:**
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md) and
+[`src/genesis.ts`](../src/genesis.ts). The current client pins a one-provider
+read but does not implement production corroboration, finality, or rollback, so
+deployment remains local-only.

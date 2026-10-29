@@ -210,6 +210,12 @@ escrow escape paths. A retained bundle protects against dependence on the other
 peer/UI, but not deletion, browser eviction, disk loss, or a compromised origin.
 No root or endpoint opening alone establishes those guarantees.
 
+The protocol requirements for archive delivery, retained artifacts, dispute
+responses, provider trust, finality, and reorganizations are specified in
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md). They remain policy
+and future implementation boundaries; Phase C's local bundle does not satisfy
+external availability by itself.
+
 ## Completion validation
 
 Phase C passed 105 Node tests, 43 contract tests, and 5 Chromium browser tests.

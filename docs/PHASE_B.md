@@ -156,6 +156,11 @@ chain reorganization handling, durable external availability, and escrow policy
 remain explicit integration assumptions. Local disconnect timing never proves
 cheating or authorizes forfeiture.
 
+The required evidence inventory, availability failure taxonomy, chain-finality
+boundary, and reorganization behavior are now specified in
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md). The current browser
+does not implement that document's production delivery or chain-trust profile.
+
 ## Completion validation
 
 Phase B passed 92 Node tests, 43 contract tests, and 5 browser tests, plus build,
