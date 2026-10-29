@@ -11,6 +11,98 @@ another party obtained an archive, that omitted evidence does not exist, or that
 one RPC response represents a final canonical chain. Those are different
 properties and must remain different protocol states.
 
+## Start here: the plain-English version
+
+A browser does not usually read a blockchain by itself. It asks an **RPC
+provider**—a server that answers questions such as “what is the current block?”
+or “was this match activated?” The answer is still one server's report. That
+server may be behind, misconfigured, dishonest, or following recent history that
+the network later replaces.
+
+That is what **“a single RPC is not economic finality”** means:
+
+> Do not release, forfeit, or refund money only because one blockchain server
+> says an event happened.
+
+Recent blocks can occasionally be replaced by a **reorganization** (“reorg”). A
+transaction visible now may disappear from the accepted history. Before money
+depends on an event, the application needs a written rule for deciding when that
+event is settled enough to rely on.
+
+### Terms used below
+
+| Term | Plain meaning |
+| --- | --- |
+| RPC provider | A server the application asks for blockchain data. MetaMask's configured network endpoint is one example. |
+| Confirmation | Another block has been built after the block containing the transaction. More confirmations generally mean more history would need to be replaced to remove it. |
+| Finalized block/tag | Some networks explicitly identify an older block that their consensus rules consider final except under an extreme failure. A node's `finalized` query asks for that block instead of the newest block. |
+| Confirmation depth | A chosen number of later blocks to wait when the network does not provide a suitable finalized-block signal. This number must be chosen for that specific network; it is not universal. |
+| Reorg monitoring | Remember the block hash and keep checking that it remains in the accepted chain. If it disappears, pause and rebuild state from the new history. |
+| Deployment profile | A short rulebook for one specific network: expected arena address/code, acceptable RPC sources, what counts as sufficiently final, and what to do after a reorg. It is not a Solidity feature. |
+| Economic finality | The point at which the application's reviewed rule says an event is settled enough to let it affect money. |
+
+So the dense sentence “a deployment profile must choose either a trustworthy
+protocol-level finalized tag or an explicit confirmation depth plus reorg
+monitoring” means:
+
+- On a network with a usable finalized-block signal, wait until the match action
+  is included in that finalized history, and corroborate it independently.
+- Otherwise, choose and document how many later blocks to wait, remember the
+  relevant block hashes, and keep checking for replacement history.
+- If the sources disagree or the transaction is replaced, pause. Re-read the
+  contract instead of guessing who should receive money.
+
+This specification deliberately does not invent a confirmation number because
+Crypto Fighter has not selected a production network. “Wait 12 blocks,” for
+example, could be reasonable on one network and dangerously wrong on another.
+
+## Worked examples
+
+### Example 1: two RPC providers disagree about match activation
+
+Alice's wallet provider says challenge 7 is activated. A separately operated
+provider says the activation transaction is missing because it is viewing a
+different chain tip.
+
+- The UI may show “activation uncertain.”
+- Alice must not start escrow play or treat the match as funded and authoritative.
+- The state is `retryable-uncertainty`, not “Alice wins,” “Bob wins,” or “bad
+  evidence.”
+- After the providers converge and the activation satisfies the network's
+  written finality rule, the browser can read the binding again and continue.
+
+### Example 2: a dispute transaction is reorganized out
+
+Bob sees his trace challenge mined and a midpoint deadline appears. Two blocks
+later, the network replaces those blocks and the accepted chain no longer
+contains Bob's challenge.
+
+- The old midpoint deadline no longer controls anything.
+- Both clients pause and reload the arena's trace state from the accepted chain.
+- Bob may resubmit only if the claim is still challengeable.
+- Nobody loses for missing a deadline that existed only on the discarded fork.
+
+### Example 3: a hash exists, but the archive does not arrive
+
+Alice publishes `journalHash = 0x123…`. Bob cannot download the journal file.
+
+- The hash would let Bob detect a changed file **if he received one**.
+- The hash cannot reconstruct or deliver the missing file.
+- This is unavailable evidence. It does not prove Alice's trace correct or
+  incorrect.
+- A future settlement rule must define Alice's delivery obligation, its deadline,
+  and the safe fund exit if she does not deliver. Issue #4 owns that consequence.
+
+### Example 4: the delivered archive has the wrong hash
+
+Bob receives a file, but its computed hash is not Alice's committed
+`journalHash`.
+
+- The file fails integrity checking and is rejected.
+- Alice may deliver the correct file while the delivery window remains open.
+- If an explicitly defined delivery deadline expires, that becomes
+  non-response. It still does not automatically prove a gameplay winner.
+
 ## Normative safety rules
 
 1. **Authenticity, integrity, availability, and chain inclusion are separate.**
@@ -22,9 +114,9 @@ properties and must remain different protocol states.
 4. **A commitment is not availability.** `journalHash`, a trace root, and
    `publishTraceArchive` detect substitution after retrieval; they do not deliver
    the committed preimage.
-5. **A single RPC is not economic finality.** One provider may support provisional
-   display and local development. It must not be the sole basis for an irreversible
-   payout, forfeiture, or deadline consequence.
+5. **A single RPC is not economic finality.** One provider may supply a “pending”
+   display or support local development. Its answer alone must not release,
+   forfeit, or refund money or establish a money-governing deadline.
 6. **Unfinalized observations are tentative.** Derived admission, deadlines,
    roots, and verdicts must be recomputed after a reorganization.
 7. **Uncertainty fails closed economically.** Provider disagreement, an unknown
@@ -56,7 +148,7 @@ resumable signing authority are never evidence and must not be archived.
 | --- | --- | --- | --- |
 | Deployment identity and canonical rules hash | Deployment configuration plus arena bytecode/constants | Expected chain ID, arena address, code identity, and `CANONICAL_RULES_HASH` | Every participant and watcher must pin the intended deployment for the whole match and dispute lifetime. Production code-identity policy is unresolved. |
 | Genesis locator and registration | Canonical chain: chain, arena, challenge ID, `challengeForGenesis` | One-block domain and registration checks in `readGenesisRecord` | Both participants retain the locator and independently reproducible block reference. A saved response is historical evidence, not fresh authority. |
-| Completed `GenesisBinding` and activation | Canonical arena state | Binding hash, both session authorization signatures, registered genesis, and authorized flag | Both participants retain the binding/signatures. Economic use requires a finality-qualified fresh read, not only an embedded record. |
+| Completed `GenesisBinding` and activation | Canonical arena state | Binding hash, both session authorization signatures, registered genesis, and authorized flag | Both participants retain the binding/signatures. Economic use requires a fresh chain read confirmed under the network-specific rule, not only an embedded record. |
 | Signed READY statements | Each delegated session | Exact schema, mode-bound lifecycle digest, slot, signer, and immutable descriptor | Each participant retains both statements before gameplay. Missing READY makes reconstruction incomplete. |
 | Signed input packets and acknowledgements | Each delegated session through the live journal | Signature, match/slot/frame/mask, self-chain, and delayed opponent-chain checks | Each participant retains every sent and received distinct signed statement, including tails and conflicts, before relying on it. |
 | Complete public journal | `BrowserEvidenceStore` / exported `phase-b-journal-v1` | Strict schema, canonical reconstruction, `journalHash` | Each participant owns at least one durable copy. A future funded protocol requires externally retrievable replication before obligations begin; mechanism is unresolved. |
@@ -137,35 +229,46 @@ They may share a future exit only if Issue #4 explicitly justifies that policy.
 
 ## Chain trust and finality by lifecycle stage
 
-No production chain is selected, so a numeric confirmation count cannot be safe
-or meaningful here. A deployment profile must choose either a trustworthy
-protocol-level finalized tag or an explicit confirmation depth plus reorg
-monitoring based on that chain's consensus and failure model.
+No production network is selected, so this document cannot responsibly say
+“wait N blocks.” Before deployment, the team must write the network-specific
+rulebook described above. It must answer:
+
+1. Which chain, arena address, and deployed code are expected?
+2. Which independent sources are allowed to report chain state?
+3. Does this network provide a suitable finalized-block signal? If so, how is it
+   checked? If not, exactly how many later blocks must be observed?
+4. Which block hashes are retained and monitored for replacement?
+5. What pauses, rolls back, or escalates when the sources disagree or a reorg is
+   deeper than expected?
+
+In the table, “confirmed” means the event passed that written rule. It does not
+mean merely “one RPC returned a transaction receipt.”
 
 | Stage | Minimum observation policy | If not final or providers disagree |
 | --- | --- | --- |
 | Challenge discovery and UI preview | One provider may show tentative data, clearly non-authoritative. Verify chain, code/deployment identity, arena, challenge, and block ancestry before use. | Keep it provisional; do not sign adoption or start an economic clock. |
-| Genesis consent/signature | Completed binding must be finality-qualified and independently checked against the intended deployment. | Do not sign. A signature over a displaced binding remains historical data and must not be retargeted. |
-| Activation and escrow admission | Registration, binding, both signatures, and authorized flag must be read from one pinned finalized block. At least one independent chain view must corroborate any single application RPC. | Do not enter escrow mode or sign READY/inputs. Current browser behavior is intentionally local-only because it lacks this production check. |
-| Archive publication and trace claim/challenge | All prerequisite arena state must be finality-qualified. The submitted transaction remains pending/tentative until the deployment policy confirms it. | Do not calculate obligations from a pending receipt. Re-read state after confirmation. |
+| Genesis consent/signature | The completed binding must be confirmed under the network-specific rule and checked against the intended arena deployment using an independent chain view. | Do not sign. A signature over a displaced binding remains historical data and must not be retargeted. |
+| Activation and escrow admission | Registration, binding, both signatures, and the authorized flag must be read from one pinned block that has passed the network-specific rule. At least one independently operated chain view must corroborate the application RPC. | Do not enter escrow mode or sign READY/inputs. Current browser behavior is intentionally local-only because it lacks this production check. |
+| Archive publication and trace claim/challenge | All prerequisite arena state must already be confirmed under the network-specific rule. A newly submitted transaction remains pending until it also passes that rule. | Do not calculate obligations from a pending receipt. Re-read state after confirmation. |
 | Midpoint/adjudication turn | Read canonical `TraceGame` state, round, responder bits, and deadline at a pinned head; monitor inclusion until finality. Contract time is authoritative only on the canonical chain. | Resubmit only if still admissible on the new canonical state. Never reuse an orphaned round/deadline assumption. |
-| Verdict | Treat `TraceAdjudicated` and `getTraceGame` as tentative until finality-qualified and mutually consistent. | Recompute from the last finalized dispute state. No economic reliance. |
+| Verdict | Treat `TraceAdjudicated` and `getTraceGame` as tentative until the adjudication transaction passes the network-specific rule and both views agree. | Recompute from the last confirmed dispute state. No economic reliance. |
 | Future settlement | Require finalized dispute inputs and define when the settlement transaction itself is final. External services must wait before taking irreversible off-chain action. | Fail closed and continue monitoring; no provisional payout assumption. |
 
-“Independent” does not necessarily mean a specific provider count. It means the
-application RPC cannot vouch for itself: corroboration must come from a separately
-administered provider, a verified light client, or another deployment-approved
-canonical-chain mechanism. The production deployment profile must choose one and
-state its correlated-failure assumptions.
+“Independent” means the application RPC cannot confirm its own answer. The
+second view must fail differently—for example, a provider operated by a different
+organization, a verified light client, or another reviewed chain-verification
+method. Two URLs run by the same company on the same infrastructure may share the
+same failure and therefore may not be meaningful corroboration. The network's
+rulebook must state what qualifies.
 
 ## Reorganization handling
 
 1. Persist the locator, block number/hash, transaction hash, and derived context
    for every chain-dependent admission or dispute action. Block number alone is
    insufficient.
-2. Detect ancestry changes against the last finality-qualified checkpoint. Stop
-   signing new match inputs and stop economic automation while the canonical
-   state is uncertain.
+2. Detect ancestry changes against the last checkpoint confirmed under the
+   network-specific rule. Stop signing new match inputs and stop economic
+   automation while the canonical state is uncertain.
 3. Roll back all derived local protocol state whose source block was displaced.
    Preserve the old signed/journal data as explicitly orphaned historical
    evidence; never rewrite or silently rebind it.
@@ -192,7 +295,7 @@ remains prohibited.
 | Local durability | Strict IndexedDB transaction before send/use; export after reload. | At least one defined external replication/delivery path with measurable obligations. |
 | Archive commitment | Participant may bind root to `journalHash`. | Retrieval locator/protocol, authenticated delivery receipt or objective deadline evidence, and retention policy. |
 | Evidence completeness | Whole supplied journal is rebuilt; conflicts and missing dependencies fail closed. | A way to obtain all obligated bytes and distinguish withheld from not-yet-delivered data. |
-| RPC trust | One injected provider, one pinned block number. | Deployment identity check, independent corroboration, block hash/ancestry retention, and finality-qualified reads. |
+| RPC trust | One injected provider, one pinned block number. | Deployment identity check, independent corroboration, block hash/ancestry retention, and reads confirmed under the network-specific rule. |
 | Reorg response | None beyond repeatable historical reads. | Pause, rollback, rebuild, resubmit, and emergency behavior as specified above. |
 | Non-response | Contract has deadlines but no complete consequence/escape. | Issue #4 state matrix covering each actor and turn after delivery preconditions. |
 | Economic result | Neutral isolated-step verdict only. | Reviewed settlement mapping with a terminating exit from every funded state. |
