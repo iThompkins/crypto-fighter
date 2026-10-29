@@ -207,7 +207,11 @@ from economic consequences.
 - A production model for chain finality, reorganizations, or trusted RPC data.
 - Public-chain deployment, real-money use, token economics, or reputation.
 
-## Legacy code that can confuse me
+## The current/legacy contract boundary
+
+The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) is the authoritative API
+classification and explains how the Solidity source contracts compose into the
+arena deployment.
 
 `CryptoFighterArena.sol` contains an older settlement experiment alongside the
 new trace dispute:
@@ -223,10 +227,12 @@ These functions are unsafe scaffolding. They are not the settlement half of the
 trace system, even though they can move local test funds. Browser actions that
 would call settlement functions are disabled.
 
-There is also a temporary `matchContextHash` when Alice first creates a
+There is also a provisional `matchContextHash` when Alice first creates a
 challenge, because Bob is not known yet. When Bob joins, the contract replaces
-it with the hash of the completed `GenesisBinding`. Only the completed value can
-be approved by both session keys and used as the trace context.
+it with the completed `GenesisBinding` hash. Authorization changes a separate
+boolean; it does not change the completed hash again. Only the completed and
+independently verified authorized value can be used as the trace context. See
+the exact [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-lifecycle).
 
 ## Where the important code lives
 
@@ -239,7 +245,7 @@ be approved by both session keys and used as the trace context.
 | Trace creation | [`src/evidence-trace.ts`](../src/evidence-trace.ts), [`src/execution-trace.ts`](../src/execution-trace.ts) | Checkpoints, roots, proofs, and dispute-ready evidence. |
 | Trace disagreement | [`src/bisection.ts`](../src/bisection.ts), [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol) | Midpoint comparison, deadlines, and the neutral verdict. |
 | One-step calculation | [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol), [`src/onchain-dispute.ts`](../src/onchain-dispute.ts) | Contract game rules and preparation of the isolated-step data. |
-| Safety boundary | [`INVARIANTS.md`](INVARIANTS.md), [`ROADMAP.md`](ROADMAP.md) | Rules current changes must preserve and work that remains. |
+| Safety boundary | [`PROTOCOL_BOUNDARY.md`](PROTOCOL_BOUNDARY.md), [`INVARIANTS.md`](INVARIANTS.md), [`ROADMAP.md`](ROADMAP.md) | Current/legacy API status, rules changes must preserve, and work that remains. |
 
 ## Short glossary
 

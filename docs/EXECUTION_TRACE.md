@@ -4,6 +4,9 @@
 > Current numeric status: Phase A v2 is documented in [FIXED_POINT_PROTOCOL.md](FIXED_POINT_PROTOCOL.md).
 > Earlier dated implementation notes below describe historical milestones.
 
+> The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) is authoritative for
+> current trace entry points, legacy payout methods, and disabled client paths.
+
 # Execution trace and interactive disputes
 
 ## Architectural decision
@@ -13,12 +16,12 @@ bisection and a minimal on-chain transition verifier**. Solidity must not receiv
 or replay an entire match transcript. Full transcript validation is an off-chain
 operation used to construct and independently check a claim's commitment.
 
-An undisputed, properly formed claim can finalize after its challenge window.
-A disputed claim must freeze result finalization while the dispute resolves.
-This is an optimistic security model: a false claim can succeed if nobody with
-the necessary data challenges in time. A Merkle root alone does not prove
-execution or data availability. Monitoring, availability, response windows and
-recovery are security requirements, not optional UI conveniences.
+A future settlement design may allow an undisputed claim to finalize after a
+challenge window, but no such trace finalizer exists today. The current trace
+path freezes its roots and can adjudicate one disputed transition; it cannot
+move or release funds. A Merkle root alone does not prove execution or data
+availability. Monitoring, availability, response windows, and recovery remain
+security requirements, not optional UI conveniences.
 
 ## Current implementation status
 
@@ -31,7 +34,8 @@ bisection turns/deadlines, and neutral one-step adjudication are implemented bel
 Phase A replaces the defective coordinate encoding with fixed-point v2.
 Authenticated non-response recovery and trace settlement remain unimplemented.
 The sections below describe the design and implementation boundaries; they do
-not claim a complete settlement protocol.
+not claim a complete settlement protocol. The exact API classification is in
+[PROTOCOL_BOUNDARY.md](PROTOCOL_BOUNDARY.md#entry-point-classification).
 
 ## Repository inspection and reuse
 
@@ -149,7 +153,12 @@ A membership proof proves inclusion only, not correctness of the state or root.
 The root, context, final frame and terminal state must be checked against locally
 rebuilt output when importing a claim.
 
-## Required settlement/dispute state machine (partially implemented)
+## Historical target settlement/dispute state machine
+
+The list below records design requirements accumulated during implementation.
+Implemented trace steps stop at neutral adjudication. Payout, non-response, and
+availability consequences remain proposals owned by Issues #4 and #5, not
+current behavior.
 
 1. Authenticate the unique genesis-to-escrow binding and session delegations before signing inputs. Claims
    bind root, format/rules/context, terminal frame, encoded terminal state and

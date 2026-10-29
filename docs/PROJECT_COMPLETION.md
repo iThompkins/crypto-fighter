@@ -4,6 +4,8 @@
 
 Phase D neutral one-step execution adjudication is implemented and locally
 verified. Phases A, B, and C remain complete. Funding and settlement are disabled.
+The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies current trace,
+legacy payout, compatibility-only, disabled, and unresolved surfaces.
 
 ## Completed components
 
