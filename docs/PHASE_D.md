@@ -4,6 +4,10 @@ Phase D completes the technically deterministic portion of a disputed trace.
 It does not decide who receives funds, impose penalties, resolve missed dispute
 turns, or enable settlement.
 
+See the [protocol-boundary guide](PROTOCOL_BOUNDARY.md) for the authoritative
+classification of current trace functions, legacy payout functions, disabled
+browser paths, and unresolved settlement work.
+
 ## Contract flow
 
 1. `claimTrace` fixes the claimant root, authenticated escrow context, canonical

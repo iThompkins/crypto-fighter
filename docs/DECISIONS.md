@@ -51,8 +51,10 @@ mark the old one `Superseded`; do not erase the history.
   chain/arena/challenge/participants/sessions/rules/escrow binding authorized once
   by both session keys. Individual move digests remain compact and genesis-bound.
 - **Consequence:** A random nonce or move signature alone has no escrow authority;
-  practice and diagnostic artifacts cannot be promoted after the fact.
-- **Context:** [GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md)
+  practice evidence remains non-contractual, while escrow evidence requires the
+  complete authorization and independent arena record.
+- **Context:** [GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md),
+  [protocol boundary](PROTOCOL_BOUNDARY.md#authoritative-current-trace-path)
 
 ## D-005 — Separate objective faults, liveness, and behavior policy
 
@@ -84,5 +86,7 @@ mark the old one `Superseded`; do not erase the history.
   step matches the claimant, challenger, or neither commitment. That verdict does
   not transfer funds, change reputation, or certify an entire trace.
 - **Consequence:** Deterministic execution is complete without inventing economic
-  consequences. Settlement waits for explicit policy decisions in Issues #4–#6.
-- **Context:** [PHASE_D.md](PHASE_D.md), [PROJECT_COMPLETION.md](PROJECT_COMPLETION.md)
+  consequences. Settlement waits for explicit policy decisions in Issues #4 and
+  #5; the current/legacy API boundary is documented separately.
+- **Context:** [PHASE_D.md](PHASE_D.md), [PROJECT_COMPLETION.md](PROJECT_COMPLETION.md),
+  [protocol boundary](PROTOCOL_BOUNDARY.md#entry-point-classification)

@@ -1,5 +1,9 @@
 # Implementation takeover — 2026-09-16
 
+> This is a dated takeover snapshot, not the current protocol map. Use the
+> [current and legacy protocol boundary](docs/PROTOCOL_BOUNDARY.md) for the
+> authoritative classification of today's APIs and paths.
+
 Baseline: clean `codex/crypto-fighter-finish` at `672d090`. Findings below were
 checked against source and executed commands, not prior agent summaries.
 

@@ -48,13 +48,17 @@ it as played could create or overturn a result.
 **Rule:** A match ID receives escrow meaning only through one complete,
 unchangeable `GenesisBinding` approved by both session keys.
 
-**Why it matters:** Practice inputs or a random match ID must not be attached to
-a funded match after the fact.
+**Why it matters:** A practice archive or random match ID has no contract
+authority. Funded evidence must belong to terms both sessions approved and an
+independently verified arena record.
 
 **Where it is enforced/tested:** [`src/genesis.ts`](../src/genesis.ts),
 [`contracts/CryptoFighterArena.sol`](../contracts/CryptoFighterArena.sol),
 [`test/genesis-authorization.test.mjs`](../test/genesis-authorization.test.mjs),
 and [`hh/test/genesis.cjs`](../hh/test/genesis.cjs).
+
+The provisional, completed, and authorized context states are distinguished in
+the [protocol-boundary guide](PROTOCOL_BOUNDARY.md#matchcontexthash-lifecycle).
 
 ## INV-05 — Save a message before sending or using it
 
@@ -89,8 +93,8 @@ the history that supports a claim.
 arena record remain different kinds of evidence. An imported file or flag cannot
 promote one into another. Current artifacts say `settlementEligible: false`.
 
-**Why it matters:** A self-authored or stale file must not gain the authority of
-a live funded match.
+**Why it matters:** A self-authored, practice, or stale file must not gain the
+authority of a live funded match.
 
 **Where it is enforced/tested:** [`src/genesis.ts`](../src/genesis.ts),
 [`src/evidence-trace.ts`](../src/evidence-trace.ts),

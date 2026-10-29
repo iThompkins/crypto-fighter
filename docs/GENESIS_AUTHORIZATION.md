@@ -17,6 +17,10 @@ continuation-packet dispute. It supplies the prerequisite authority and proof
 primitives. The arena remains local-chain-only, and the pure Merkle verifier
 cannot transfer funds or decide an outcome.
 
+The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) is authoritative for which
+arena and client entry points are current, legacy, compatibility-only, disabled,
+or unresolved.
+
 ## Contract lifecycle
 
 1. `challenge` permanently reserves `challengeForGenesis[genesis]` for the new
@@ -24,7 +28,8 @@ cannot transfer funds or decide an outcome.
 2. `join` records a distinct P2 wallet and distinct nonzero session key, verifies
    equal stake/opponent restriction, and freezes a `GenesisBinding` snapshot.
    The original `Challenge.stake` may later become zero, but this snapshot never
-   changes. Before join, `matchContextHash` is provisional and cannot be authorized.
+   changes. `join` replaces the provisional `matchContextHash` with the completed
+   binding hash. Before join, the provisional value cannot be authorized.
 3. Each session signs its slot-specific authorization digest over the completed
    binding hash. `authorizeGenesis` can be relayed by anyone with both signatures;
    only the two delegated keys can produce the accepted signatures. Activation
@@ -37,6 +42,10 @@ cannot transfer funds or decide an outcome.
    rather than declaring a gameplay loser. An activated match cannot use this
    refund. Effects precede guarded transfers; recipient contracts that refuse
    transfers remain a known push-payment recovery limitation.
+
+Authorization changes `genesisAuthorized`; it does not rewrite the completed
+binding hash. The exact provisional/completed/authorized states and permitted
+consumers are listed in the [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-lifecycle).
 
 Uniqueness is authoritative within the specified arena. Another arena/chain can
 physically register the same bytes, but cannot reuse the original authorization:
@@ -128,15 +137,13 @@ complete settlement protocol exists. The experimental CLI continues to produce
 diagnostic roots; the authorized API requires a chain record and has no implicit
 self-authorizing file mode.
 
-## Progress toward disputes
+## Current dispute boundary
 
 `src/bisection.ts` is an off-chain interactive coordinator. It authenticates the
 registered binding, equal canonical genesis checkpoints and unequal terminal
 endpoints under two fixed roots. Each round waits for both valid midpoint
 openings. Wrong/replayed proofs cannot move its bracket. It isolates adjacent
 indices within nine rounds and returns their checkpoint hashes, not a winner.
-It does not implement authoritative transaction senders, on-chain turn deadlines,
-availability enforcement, slashing or payout adjudication.
 
 `contracts/TraceCommitmentVerifier.sol` verifies the same ordered nine-sibling
 openings and checkpoint hashes in Solidity. It accepts only compact checkpoints
@@ -145,18 +152,19 @@ The integration test builds an authorized trace from an actually activated
 Hardhat record and checks genesis/interior/terminal/padded-terminal openings in
 Solidity, including wrong-domain/index/length rejection.
 
-Claims, roots and midpoint turns/deadlines are now frozen in the arena.
-Phase A resolves the former numeric encoding blocker. Phase B integrates
-authorized browser matches, authenticated lifecycle/input chains and durable
-evidence; see [its current guarantees](PHASE_B.md). Checking the isolated transition with a canonical minimal step verifier
-belongs to a later phase. Resolving a step must not blindly certify every other
-state of a challenger's trace. Availability and result replacement/refund rules
-must be resolved and tested before enabling payouts. Full-transcript on-chain
-replay is not an allowed fallback.
+Claims, roots, midpoint turns/deadlines, and neutral isolated-step adjudication
+are now implemented in the arena. Phase A supplies the numeric codec; Phases B
+and C supply durable evidence and dispute artifacts; Phase D supplies the
+one-step verifier. The current path records only `Claimant`, `Challenger`, or
+`Neither`. It does not certify every other trace state or decide funds.
+Availability, non-response, and result replacement/refund rules must be resolved
+and tested before enabling payouts. Full-transcript on-chain replay is not an
+allowed fallback.
 
-## Updated continuation boundary — 2026-09-17
+## Historical continuation boundary — 2026-09-17
 
-Arena trace claims and authenticated midpoint turns/deadlines now exist; see
+This dated milestone predates Phase A and Phase D. Arena trace claims and
+authenticated midpoint turns/deadlines existed at that point; see
 EXECUTION_TRACE.md. All legacy settlement entries reject matches with a trace
 claim. The remaining single-step verifier is blocked on a reproduced state-codec
 defect: valid canonical gameplay reaches quarter-unit coordinates, which the
@@ -164,7 +172,7 @@ current doubled-integer state encoding rejects. Genesis authorization remains
 unchanged; it does not remedy this representation failure. No settlement is enabled.
 
 
-## Phase A numeric migration
+## Historical Phase A numeric migration
 
 The dated blocker above is resolved by [fixed-point protocol v2](FIXED_POINT_PROTOCOL.md).
 Genesis binding and authorization v1 schemas are unchanged; their canonical rules

@@ -5,8 +5,10 @@ one-step adjudication.
 
 Not implemented: safe settlement.
 
-Future work is tracked separately in [Issue #6](https://github.com/iThompkins/crypto-fighter/issues/6),
-[Issue #5](https://github.com/iThompkins/crypto-fighter/issues/5), and
-[Issue #4](https://github.com/iThompkins/crypto-fighter/issues/4). Until that work
-is specified, implemented, tested, and reviewed, settlement stays disabled and
-deployment stays local-only.
+The current trace, legacy settlement, compatibility, and disabled paths are
+classified in the [protocol-boundary guide](PROTOCOL_BOUNDARY.md).
+
+Future policy work is tracked in [Issue #5](https://github.com/iThompkins/crypto-fighter/issues/5)
+and [Issue #4](https://github.com/iThompkins/crypto-fighter/issues/4). Until that
+work is specified, implemented, tested, and reviewed, settlement stays disabled
+and deployment stays local-only.
