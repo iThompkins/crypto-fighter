@@ -5,7 +5,7 @@ one-step adjudication.
 
 Not implemented: safe settlement.
 
-The current trace, legacy settlement, compatibility, and disabled paths are
+The current trace path, removed legacy surface, and unresolved work are
 classified in the [protocol-boundary guide](PROTOCOL_BOUNDARY.md).
 
 Future policy work is tracked in [Issue #5](https://github.com/iThompkins/crypto-fighter/issues/5)

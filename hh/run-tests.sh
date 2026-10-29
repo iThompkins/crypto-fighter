@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the on-chain settlement tests against a local Hardhat EVM.
+# Runs the arena lifecycle and trace tests against a local Hardhat EVM.
 # Isolated in hh/ (no "type: module") to avoid the app's ESM setting.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"

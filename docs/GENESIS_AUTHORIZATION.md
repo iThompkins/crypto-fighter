@@ -12,14 +12,14 @@ signatures establish the authority behind that compact move identifier.
 These signatures authorize the match before play, not its eventual result.
 A terminal winner does not require a new opponent result signature.
 
-This increment does not enable browser settlement or repair the legacy
-continuation-packet dispute. It supplies the prerequisite authority and proof
-primitives. The arena remains local-chain-only, and the pure Merkle verifier
-cannot transfer funds or decide an outcome.
+This increment did not enable browser settlement. It supplies prerequisite
+authority and proof primitives. The arena remains local-chain-only, and the
+pure Merkle verifier cannot transfer funds or decide an outcome. The later
+Issue #9 cleanup removed the unsound continuation and gameplay-timeout payout
+APIs instead of repairing them.
 
 The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) is authoritative for which
-arena and client entry points are current, legacy, compatibility-only, disabled,
-or unresolved.
+arena and client entry points are current, removed, or unresolved.
 
 ## Contract lifecycle
 
@@ -35,8 +35,8 @@ or unresolved.
    only the two delegated keys can produce the accepted signatures. Activation
    is atomic, one-time and requires a still-active challenge before or at the
    authorization deadline (`joinedAt + responseWindow`).
-4. Legacy result and gameplay timeout entry points require activation. They
-   remain unsafe settlement sketches, not the new trace dispute protocol.
+4. Current trace entry points require activation and end in a neutral verdict
+   with no fund effect.
 5. If activation never completes, anyone may call `refundUnactivatedMatch` strictly
    after the deadline. It cancels once and returns each deposit to its owner,
    rather than declaring a gameplay loser. An activated match cannot use this
@@ -165,8 +165,8 @@ allowed fallback.
 
 This dated milestone predates Phase A and Phase D. Arena trace claims and
 authenticated midpoint turns/deadlines existed at that point; see
-EXECUTION_TRACE.md. All legacy settlement entries reject matches with a trace
-claim. The remaining single-step verifier is blocked on a reproduced state-codec
+EXECUTION_TRACE.md. At that time, all legacy settlement entries rejected matches
+with a trace claim; those entries were later removed. The remaining single-step verifier was blocked on a reproduced state-codec
 defect: valid canonical gameplay reaches quarter-unit coordinates, which the
 current doubled-integer state encoding rejects. Genesis authorization remains
 unchanged; it does not remedy this representation failure. No settlement is enabled.
