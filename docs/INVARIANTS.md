@@ -198,12 +198,13 @@ Silence or a `Neither` verdict can leave local test escrow locked.
 **Rule:** Authenticity, integrity, availability, and canonical-chain inclusion
 are checked separately. Missing or withheld evidence is not relabeled invalid,
 and it cannot become a `Neither` execution verdict. Unavailable evidence,
-non-response, objective signed faults, and retryable chain uncertainty remain
-distinct inputs to future settlement policy.
+non-response, and objective signed faults remain distinct facts. A disclosed
+settlement policy may still assign several failures the same timeout outcome.
 
 **Why it matters:** A signature or hash does not deliver its preimage, while
-failure to retrieve data does not prove that data false. Collapsing those states
-would let infrastructure failure assign value or blame.
+failure to retrieve data does not prove that data false. The distinction keeps
+the protocol honest about what happened without requiring it to prove motive or
+eliminate ordinary availability risk.
 
 **Where it is specified/enforced:**
 [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md),
@@ -212,20 +213,19 @@ would let infrastructure failure assign value or blame.
 [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol). External delivery
 and economic consequences are not yet enforced.
 
-## INV-15 — Tentative chain observations have no economic authority
+## INV-15 — RPC and confirmation trust is explicit
 
-**Rule:** A single RPC response or an unfinalized block may support provisional
-display only. Escrow admission, dispute obligations, verdict reliance, and any
-future settlement require deployment-qualified canonical-chain confirmation;
-provider disagreement or a reorganization produces retryable uncertainty and a
-rollback/rebuild, never a default winner.
+**Rule:** The client may rely on its configured RPC after the published
+network-specific confirmation rule is met. Users who want stronger assurance
+may choose another provider or run their own node. After a reorg, clients reload
+arena state and ignore actions that existed only on the discarded fork.
 
-**Why it matters:** Correct local verification against stale or noncanonical
-chain state is still unsafe. Reorged bindings, roots, deadlines, and verdicts
-cannot authorize irreversible effects.
+**Why it matters:** Provider and recent-chain risk cannot be eliminated for every
+user. The community needs to know the default trust and recovery behavior so
+players can choose the assurance level appropriate for them.
 
 **Where it is specified/enforced:**
 [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md) and
-[`src/genesis.ts`](../src/genesis.ts). The current client pins a one-provider
-read but does not implement production corroboration, finality, or rollback, so
+[`src/genesis.ts`](../src/genesis.ts). The current client pins one provider read;
+production confirmation defaults and reorg recovery remain unimplemented, so
 deployment remains local-only.

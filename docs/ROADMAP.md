@@ -18,6 +18,6 @@ and deployment stays local-only.
 The specification for Issue #5 is in
 [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md). It defines the
 minimum evidence package, separates invalid/unavailable/non-response/uncertain
-states, assigns retention responsibilities, and sets conservative finality and
-reorganization requirements. Delivery infrastructure, production-chain finality
-parameters, and economic consequences remain implementation/policy work.
+states, assigns retention responsibilities, and documents configured-RPC,
+confirmation, and reorganization assumptions. Backup/hosting features are
+optional product work; network defaults and economic consequences remain open.

@@ -203,18 +203,19 @@ the authenticated pre-state, inputs, checkpoint heads, fixed-point rules, and
 terminal-absorption distinction for one independently executed step. The F-2
 witness structure assumes the current fixed INPUT_DELAY=2 rules fingerprint.
 
-Local export is not an external availability service. Later phases must define
-availability commitments/delivery, withheld or lost evidence, canonical-chain
-activation/finality and reorg handling, claim replacement, and objective eventual
-escrow escape paths. A retained bundle protects against dependence on the other
-peer/UI, but not deletion, browser eviction, disk loss, or a compromised origin.
-No root or endpoint opening alone establishes those guarantees.
+Local export is not an external availability service. Later settlement work must
+disclose player evidence responsibilities, the consequence of withheld or lost
+evidence, configured-RPC/confirmation assumptions, reorg handling, claim
+replacement, and objective eventual escrow exits. A retained bundle protects
+against dependence on the other peer/UI, but not deletion, browser eviction,
+disk loss, or a compromised origin. No root or endpoint opening alone provides
+recovery after the source evidence is lost.
 
-The protocol requirements for archive delivery, retained artifacts, dispute
-responses, provider trust, finality, and reorganizations are specified in
-[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md). They remain policy
-and future implementation boundaries; Phase C's local bundle does not satisfy
-external availability by itself.
+The practical assumptions for archive retention, dispute responses, configured
+RPC trust, confirmations, and reorganizations are specified in
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md). Phase C's local
+bundle supports self-defense while retained; it does not recover a file the user
+has lost or guarantee that an opponent responds.
 
 ## Completion validation
 
