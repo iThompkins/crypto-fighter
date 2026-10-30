@@ -149,12 +149,18 @@ Invalid recovered evidence is rejected. Exported copies remain useful backups.
 
 Phase C/D consume these authenticated evidence and ordering guarantees; canonical
 reconstruction and neutral minimal-step execution are now implemented. Later work
-must resolve availability and result-replacement rules and test objective exits from every
-funded state before enabling settlement. Historical activation evidence does not
-replace fresh chain checks for any future settlement action. RPC trust/finality,
-chain reorganization handling, durable external availability, and escrow policy
-remain explicit integration assumptions. Local disconnect timing never proves
-cheating or authorizes forfeiture.
+must publish non-response and result-replacement rules and test objective exits
+from every funded state before enabling settlement. Historical activation evidence
+does not replace fresh chain checks for any future settlement action. Configured
+RPC trust, confirmations, reorganization handling, player evidence retention,
+and escrow policy remain explicit operating assumptions. Local disconnect timing
+does not prove cheating, though a disclosed missed-response rule may still allow
+escrow to exit.
+
+The practical evidence responsibilities, non-response classification, configured
+RPC trust, confirmation assumptions, and reorganization behavior are specified
+in [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md). The current
+browser does not yet automate production confirmation or reorg recovery.
 
 ## Completion validation
 

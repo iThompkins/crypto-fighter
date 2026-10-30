@@ -192,3 +192,40 @@ safe exit from every funded state have not been solved.
 Every funded state should eventually have a safe, objective exit, even if one
 player disappears. The current trace path does not provide that guarantee.
 Silence or a `Neither` verdict can leave local test escrow locked.
+
+## INV-14 — Evidence properties and failure states remain distinct
+
+**Rule:** Authenticity, integrity, availability, and canonical-chain inclusion
+are checked separately. Missing or withheld evidence is not relabeled invalid,
+and it cannot become a `Neither` execution verdict. Unavailable evidence,
+non-response, and objective signed faults remain distinct facts. A disclosed
+settlement policy may still assign several failures the same timeout outcome.
+
+**Why it matters:** A signature or hash does not deliver its preimage, while
+failure to retrieve data does not prove that data false. The distinction keeps
+the protocol honest about what happened without requiring it to prove motive or
+eliminate ordinary availability risk.
+
+**Where it is specified/enforced:**
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md),
+[`src/evidence-archive.ts`](../src/evidence-archive.ts),
+[`src/evidence-trace.ts`](../src/evidence-trace.ts), and
+[`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol). External delivery
+and economic consequences are not yet enforced.
+
+## INV-15 — RPC and confirmation trust is explicit
+
+**Rule:** The client may rely on its configured RPC after the published
+network-specific confirmation rule is met. Users who want stronger assurance
+may choose another provider or run their own node. After a reorg, clients reload
+arena state and ignore actions that existed only on the discarded fork.
+
+**Why it matters:** Provider and recent-chain risk cannot be eliminated for every
+user. The community needs to know the default trust and recovery behavior so
+players can choose the assurance level appropriate for them.
+
+**Where it is specified/enforced:**
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md) and
+[`src/genesis.ts`](../src/genesis.ts). The current client pins one provider read;
+production confirmation defaults and reorg recovery remain unimplemented, so
+deployment remains local-only.

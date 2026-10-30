@@ -245,6 +245,7 @@ the exact [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-l
 | Trace creation | [`src/evidence-trace.ts`](../src/evidence-trace.ts), [`src/execution-trace.ts`](../src/execution-trace.ts) | Checkpoints, roots, proofs, and dispute-ready evidence. |
 | Trace disagreement | [`src/bisection.ts`](../src/bisection.ts), [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol) | Midpoint comparison, deadlines, and the neutral verdict. |
 | One-step calculation | [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol), [`src/onchain-dispute.ts`](../src/onchain-dispute.ts) | Contract game rules and preparation of the isolated-step data. |
+| Evidence and chain trust | [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md), [`PHASE_B.md`](PHASE_B.md), [`PHASE_C.md`](PHASE_C.md) | Required evidence, retention responsibility, availability failures, RPC/finality assumptions, and reorg handling. |
 | Safety boundary | [`PROTOCOL_BOUNDARY.md`](PROTOCOL_BOUNDARY.md), [`INVARIANTS.md`](INVARIANTS.md), [`ROADMAP.md`](ROADMAP.md) | Current/legacy API status, rules changes must preserve, and work that remains. |
 
 ## Short glossary
