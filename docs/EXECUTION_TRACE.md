@@ -5,7 +5,7 @@
 > Earlier dated implementation notes below describe historical milestones.
 
 > The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) is authoritative for
-> current trace entry points, legacy payout methods, and disabled client paths.
+> current trace entry points, removed legacy methods, and unresolved policy.
 
 # Execution trace and interactive disputes
 
@@ -52,7 +52,7 @@ availability requirement. The existing continuation-packet dispute materially
 conflicts: an F+1 signature pair does not prove an error at F. It must eventually
 be replaced, not renamed as a fraud proof. The existing arbitrary claim/timeout
 hashes are also insufficient. No replacement settlement code is introduced by
-this primitive increment, and browser settlement remains disabled.
+this primitive increment, and the browser sends no contract transaction.
 
 The prior proposal's execution-acknowledgement mechanism was unresolved. It is
 not silently treated as implemented or as a mandatory opponent co-signature
@@ -212,8 +212,8 @@ non-response payout rules still require explicit decisions before settlement.
 
 ## On-chain turn implementation — 2026-09-17
 
-`TraceDispute`, inherited by the arena, now accepts `claimTrace` only from an
-activated escrow participant with no legacy claim/timeout. It fixes the root and
+`TraceDispute`, inherited by the arena, accepts `claimTrace` only from an
+activated escrow participant. It fixes the root and
 binding context, proves the canonical genesis and index-300 endpoint, and binds
 terminal frame/outcome to the revealed ABI state. Terminal execution and absorbing
 normalization remain optimistic. There is deliberately no trace payout entry point.
@@ -225,12 +225,12 @@ either order, under one shared deadline. Explicit round numbers prevent stale
 transaction replay. Invalid/duplicate/late responses cannot alter the clock or
 bracket. Both valid responses advance equal(low)/unequal(high); adjacency stops
 midpoint turns after at most nine rounds. Events and `getTraceGame` expose roots,
-responders, bracket, round and deadline. All legacy settlement/timeout entries
-reject a match once any trace claim exists, including an expired trace claim.
+responders, bracket, round and deadline. The legacy settlement/timeout entries
+described by this dated milestone were removed in Issue #9.
 
 This stage intentionally locks local test deposits pending adjudication/recovery;
 it is not a usable escrow lifecycle. Trace claims never transfer funds. Browser
-settlement and real-money deployment remain disabled.
+contract transactions in the browser and real-money deployment remain disabled.
 
 ## Neutral one-step implementation — 2026-10-01
 

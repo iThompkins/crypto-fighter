@@ -153,7 +153,7 @@ test('browser verifies locally read escrow delegation before authenticated live 
   await host.getByRole('button', { name: 'Start Match', exact: true }).click();
   for (const page of [host, joiner]) {
     await expect(page.getByText('escrow: running', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Claim Result', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Claim Result', exact: true })).toHaveCount(0);
   }
   const saved = await host.evaluate(async () => {
     const { BrowserEvidenceStore } = await import('/src/evidence-store.ts');

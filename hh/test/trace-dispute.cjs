@@ -107,23 +107,5 @@ describe('On-chain authenticated trace bisection', function () {
     await reject(m.arena.connect(m.p2).revealMidpoint(1,0,m.b.open(150)),'trace deadline passed');
     assert.equal((await m.arena.getTraceGame(1)).deadline,deadline);
   });
-  it('prevents legacy payout and gameplay-timeout bypasses before and during a dispute', async function () {
-    const m = await fixture(); await claim(m);
-    for (const disputed of [false,true]) {
-      if (disputed) await challenge(m);
-      await reject(m.arena.claimResult(1,1,300,ethers.id('head'),zero,zero),'trace claim active');
-      await reject(m.arena.claimTimeout(1,1,ethers.id('head'),ethers.id('packet')),'trace claim active');
-      await reject(m.arena.finalizeResult(1),'trace claim active');
-      await reject(m.arena.forfeitTimeout(1),'trace claim active');
-    }
-  });
-  it('cannot start a trace while a legacy claim or timeout is active', async function () {
-    for (const timeout of [false,true]) {
-      const m = await fixture();
-      if (timeout) await m.arena.claimTimeout(1,1,ethers.id('head'),ethers.id('packet'));
-      else await m.arena.claimResult(1,1,300,ethers.id('head'),zero,zero);
-      await reject(claim(m),'legacy claim active');
-    }
-  });
 });
 module.exports = { fixture, claim, challenge, tree, cpHash, checkpoint, state, reject };

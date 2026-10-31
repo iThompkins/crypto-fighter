@@ -174,9 +174,9 @@ the length of the match.
 
 ## INV-13 — Trace verdicts do not authorize real funds
 
-**Rule:** Browser settlement actions remain disabled, deployment remains limited
+**Rule:** The browser sends no contract transactions, deployment remains limited
 to the in-process Hardhat chain, and a trace verdict has no payout or refund
-effect. Older payout functions are unsafe local scaffolding.
+effect. The older payout functions have been removed.
 
 **Why it matters:** Settlement rules, evidence availability, non-response, and a
 safe exit from every funded state have not been solved.
@@ -184,7 +184,7 @@ safe exit from every funded state have not been solved.
 **Where it is enforced/tested:** [`src/App.tsx`](../src/App.tsx),
 [`src/chain.ts`](../src/chain.ts),
 [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol),
-[`test/settlement-disabled.test.mjs`](../test/settlement-disabled.test.mjs), and
+[`hh/test/match-lifecycle.cjs`](../hh/test/match-lifecycle.cjs), and
 [`hh/test/deployment.cjs`](../hh/test/deployment.cjs).
 
 ## Important missing guarantee

@@ -5,8 +5,8 @@ It does not decide who receives funds, impose penalties, resolve missed dispute
 turns, or enable settlement.
 
 See the [protocol-boundary guide](PROTOCOL_BOUNDARY.md) for the authoritative
-classification of current trace functions, legacy payout functions, disabled
-browser paths, and unresolved settlement work.
+classification of current trace functions, the removed legacy APIs, the
+non-transactional browser, and unresolved settlement work.
 
 ## Contract flow
 
@@ -36,9 +36,9 @@ matches the rules.
 Inlining the rules engine made the arena runtime 27,070 bytes, above the 24,576
 byte EIP-170 limit. The arena now creates one immutable `GameTransitionVerifier`
 in its constructor and calls it for pure state/signature work. Verified optimized
-runtime sizes are 23,739 bytes for the arena and 7,995 bytes for the verifier;
-the arena initcode is 31,987 bytes. The existing constructor and deployment
-script still restrict use to the in-process local chain.
+runtime sizes after the Issue #9 cleanup are 17,606 bytes for the arena and
+7,995 bytes for the verifier; the arena initcode is 25,854 bytes. The existing
+constructor and deployment script still restrict use to the in-process local chain.
 
 ## Evidence and availability
 
@@ -77,6 +77,6 @@ unimplemented:
 - canonical-chain finality/reorg assumptions for fresh activation checks;
 - bonds, fees, forfeitures, payout splits, reputation, and settlement incentives.
 
-Until those are approved, trace verdicts are neutral facts, legacy payout paths
-remain unsafe local scaffolding, every client artifact says
-`settlementEligible: false`, and browser settlement stays disabled.
+Until those are approved, trace verdicts are neutral facts, every client
+artifact says `settlementEligible: false`, and the browser sends no contract
+transaction. The unsafe legacy payout paths were removed in Issue #9.
