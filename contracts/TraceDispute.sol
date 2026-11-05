@@ -15,6 +15,8 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
         address challenger;
         bytes32 claimantRoot;
         bytes32 challengerRoot;
+        bytes32 claimantEndpoint;
+        bytes32 challengerEndpoint;
         bytes32 contextHash;
         uint256 deadline;
         uint256 window;
@@ -29,6 +31,8 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
         uint8 responded;
         uint256 finalFrame;
         uint8 outcome;
+        uint256 challengerFinalFrame;
+        uint8 challengerOutcome;
         StepVerdict verdict;
         bytes32 canonicalPost;
     }
@@ -41,6 +45,9 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
     event TraceMidpoint(uint256 indexed id, uint256 round, address indexed participant, bytes32 checkpointHash);
     event TraceBracket(uint256 indexed id, uint256 low, uint256 high, bytes32 agreed, bytes32 claimantUpper, bytes32 challengerUpper, uint256 deadline);
     event TraceAdjudicated(uint256 indexed id, uint256 frame, StepVerdict verdict, bytes32 canonicalPost, bytes32 canonicalStateHash);
+    event TraceSurvived(uint256 indexed id, address indexed participant, bytes32 root, uint256 verifiedThrough, uint256 deadline);
+    event TraceOutcomeAccepted(uint256 indexed id, address indexed participant, uint8 outcome);
+    event TraceNoResult(uint256 indexed id);
     event EvidenceFaultProven(uint256 indexed id, bytes32 indexed faultId, EvidenceFaultKind kind, uint256 player, uint256 frame, bytes32 packetA, bytes32 packetB);
     event TraceArchivePublished(uint256 indexed id, address indexed participant, bytes32 indexed root, bytes32 journalHash);
 
@@ -65,6 +72,9 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
     // Hook authenticates the active escrow, activation, participants and exclusivity.
     function _traceContext(uint256 id) internal view virtual returns (address p1, address p2, bytes32 context, uint256 window);
     function _traceEvidence(uint256 id) internal view virtual returns (bytes32 matchId, address p1Signer, address p2Signer);
+    function _beforeTraceClaim(uint256 id) internal view virtual;
+    function _onTraceOutcome(uint256 id, uint8 outcome) internal virtual;
+    function _onTraceNoResult(uint256 id) internal virtual;
 
     function _recover(bytes32 digest, bytes memory signature) internal view returns (address) {
         return transitionVerifier.recoverDigest(digest, signature);
@@ -97,6 +107,7 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
         }
     }
     function claimTrace(uint256 id, bytes32 root, Opening calldata genesis, Opening calldata endpoint, TraceState calldata terminalState) external {
+        _beforeTraceClaim(id);
         (address p1, address p2, bytes32 context, uint256 window) = _traceContext(id);
         require(msg.sender == p1 || msg.sender == p2, "not participant");
         TraceGame storage g = traceGames[id];
@@ -112,6 +123,7 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
         g.claimant = msg.sender;
         g.contextHash = context;
         g.claimantRoot = root;
+        g.claimantEndpoint = upper;
         g.window = window;
         g.deadline = block.timestamp + window;
         g.high = 300;
@@ -121,21 +133,55 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
         g.outcome = terminalState.outcome;
         emit TraceClaimed(id, msg.sender, root, g.deadline);
     }
-    function challengeTrace(uint256 id, bytes32 root, Opening calldata genesis, Opening calldata endpoint) external {
+    function challengeTrace(
+        uint256 id,
+        bytes32 root,
+        Opening calldata anchor,
+        Opening calldata endpoint,
+        TraceState calldata terminalState
+    ) external {
         (address p1, address p2,,) = _traceContext(id);
         TraceGame storage g = traceGames[id];
         require(g.phase == TracePhase.Claimed, "trace not challengeable");
         require(msg.sender == (g.claimant == p1 ? p2 : p1), "only trace opponent");
         require(block.timestamp <= g.deadline, "trace deadline passed");
-        require(_opening(root, g.contextHash, 0, genesis) == g.agreed, "wrong genesis checkpoint");
+        require(g.low < 300, "trace fully checked");
+        require(_opening(root, g.contextHash, g.low, anchor) == g.agreed, "wrong agreed checkpoint");
         bytes32 upper = _opening(root, g.contextHash, 300, endpoint);
-        require(upper != g.claimantUpper, "trace endpoints equal");
+        require(upper != g.claimantEndpoint, "trace endpoints equal");
+        require(terminalState.terminal && terminalState.frame > 0 && terminalState.frame <= 300, "invalid terminal frame");
+        require(terminalState.outcome > 0 && terminalState.outcome <= 3, "invalid terminal outcome");
+        require(hashTraceState(terminalState) == endpoint.checkpoint.stateHash, "terminal state mismatch");
         g.phase = TracePhase.Bisecting;
         g.challenger = msg.sender;
         g.challengerRoot = root;
+        g.challengerEndpoint = upper;
         g.challengerUpper = upper;
+        g.challengerFinalFrame = terminalState.frame;
+        g.challengerOutcome = terminalState.outcome;
+        g.high = 300;
         g.deadline = block.timestamp + g.window;
         emit TraceChallenged(id, msg.sender, root, g.deadline);
+    }
+
+    function finalizeTraceClaim(uint256 id) external {
+        TraceGame storage g = traceGames[id];
+        require(g.phase == TracePhase.Claimed, "trace not finalizable");
+        require(block.timestamp > g.deadline, "trace window open");
+        _acceptCandidate(id, true);
+    }
+
+    function expireTraceTurn(uint256 id) external {
+        TraceGame storage g = traceGames[id];
+        require(g.phase == TracePhase.Bisecting || g.phase == TracePhase.Adjacent, "trace not expirable");
+        require(block.timestamp > g.deadline, "trace window open");
+        if (g.phase == TracePhase.Bisecting && g.responded == 1) {
+            _acceptCandidate(id, true);
+        } else if (g.phase == TracePhase.Bisecting && g.responded == 2) {
+            _acceptCandidate(id, false);
+        } else {
+            _noResult(id);
+        }
     }
     function revealMidpoint(uint256 id, uint256 round, Opening calldata midpoint) external {
         TraceGame storage g = traceGames[id];
@@ -208,10 +254,14 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
         bool claimantValid = canonicalPost == g.claimantUpper;
         bool challengerValid = canonicalPost == g.challengerUpper;
         StepVerdict verdict = claimantValid ? StepVerdict.Claimant : challengerValid ? StepVerdict.Challenger : StepVerdict.Neither;
-        g.phase = TracePhase.Resolved;
         g.verdict = verdict;
         g.canonicalPost = canonicalPost;
         emit TraceAdjudicated(id, g.high, verdict, canonicalPost, canonicalStateHash);
+        if (verdict == StepVerdict.Neither) {
+            _noResult(id);
+        } else {
+            _promoteSurvivor(id, verdict == StepVerdict.Claimant);
+        }
     }
 
     function proveInvalidInput(uint256 id, SignedPacket calldata packet) external returns (bytes32 faultId) {
@@ -243,5 +293,49 @@ abstract contract TraceDispute is TraceCommitmentVerifier, GameTypes {
         require(!provenEvidenceFaults[faultId], "fault already proven");
         provenEvidenceFaults[faultId] = true;
         emit EvidenceFaultProven(id, faultId, EvidenceFaultKind.Equivocation, a.player, a.frame, low, high);
+    }
+
+    function _promoteSurvivor(uint256 id, bool claimantSurvives) private {
+        TraceGame storage g = traceGames[id];
+        if (!claimantSurvives) {
+            g.claimant = g.challenger;
+            g.claimantRoot = g.challengerRoot;
+            g.claimantEndpoint = g.challengerEndpoint;
+            g.finalFrame = g.challengerFinalFrame;
+            g.outcome = g.challengerOutcome;
+        }
+        g.low = g.high;
+        g.high = 300;
+        g.agreed = g.canonicalPost;
+        g.claimantUpper = g.claimantEndpoint;
+        g.challenger = address(0);
+        g.challengerRoot = bytes32(0);
+        g.challengerEndpoint = bytes32(0);
+        g.challengerUpper = bytes32(0);
+        g.challengerFinalFrame = 0;
+        g.challengerOutcome = 0;
+        g.responded = 0;
+        g.claimantMid = bytes32(0);
+        g.challengerMid = bytes32(0);
+        g.phase = TracePhase.Claimed;
+        g.deadline = block.timestamp + g.window;
+        emit TraceSurvived(id, g.claimant, g.claimantRoot, g.low, g.deadline);
+    }
+
+    function _acceptCandidate(uint256 id, bool claimantCandidate) private {
+        TraceGame storage g = traceGames[id];
+        address participant = claimantCandidate ? g.claimant : g.challenger;
+        uint8 acceptedOutcome = claimantCandidate ? g.outcome : g.challengerOutcome;
+        require(participant != address(0) && acceptedOutcome > 0 && acceptedOutcome <= 3, "missing trace candidate");
+        g.phase = TracePhase.Resolved;
+        emit TraceOutcomeAccepted(id, participant, acceptedOutcome);
+        _onTraceOutcome(id, acceptedOutcome);
+    }
+
+    function _noResult(uint256 id) private {
+        TraceGame storage g = traceGames[id];
+        g.phase = TracePhase.Resolved;
+        emit TraceNoResult(id);
+        _onTraceNoResult(id);
     }
 }

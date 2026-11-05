@@ -2,10 +2,9 @@
 
 ## Current milestone
 
-Phase D neutral one-step execution adjudication is implemented and locally
-verified. Phases A, B, and C remain complete. Funding and settlement are disabled.
-The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies current trace,
-the removed legacy surface, and unresolved settlement work.
+Local token funding, 24-hour dispute progression, and vault-accounting settlement
+now build on completed Phases A–D. The browser and public-chain deployment remain
+disabled. The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies the current surface.
 
 ## Completed components
 
@@ -15,7 +14,8 @@ the removed legacy surface, and unresolved settlement work.
 - Escrow/genesis/session binding and context-bound trace roots.
 - On-chain fixed-root claim/challenge and authenticated midpoint bisection.
 - Independent Solidity state validation and one-step execution, including terminal absorption.
-- Neutral claimant/challenger/neither adjudication with no payout or reputation effect.
+- Claimant/challenger/neither adjudication with correction and timeout progression.
+- CFC and approved-token escrow with pull credits, settled treasury, and prefunded rewards.
 - Separate objective records for signed invalid input and equivocation.
 - Participant root-to-journal integrity commitments without availability claims.
 - Phase C-to-contract claim, midpoint, and adjudication witness preparation.
@@ -28,7 +28,8 @@ the removed legacy surface, and unresolved settlement work.
 - One-step execution binds the activated match, delegated signers, exact frame and slots,
   input bounds, self chains, F-2 acknowledgement chains, pre-state, frame head, and both roots.
 - Terminal trace padding is absorption and consumes no packet.
-- A one-step verdict does not certify every other checkpoint or authorize settlement.
+- A one-step verdict does not certify every other checkpoint; a surviving trace
+  receives another response window before terminal settlement.
 - Practice, historical inspection, and independently verified escrow authority remain distinct.
 - No full transcript is replayed on-chain.
 - Browser/CLI artifacts and all trace outputs remain `settlementEligible: false`.
@@ -36,22 +37,19 @@ the removed legacy surface, and unresolved settlement work.
 
 ## Remaining components
 
-- Policy-approved mapping from neutral verdicts and unchallenged claims to escrow state.
-- Authenticated non-response resolution and objective escrow escape.
 - Enforced evidence delivery/availability and recovery beyond local retention/integrity hashes.
 - Approved claim replacement, simultaneous dispute, both-invalid, and equivocation consequences.
 - Approved chain-finality/reorg trust assumptions for transaction-time record refresh.
-- Policy and implementation for a safe funded-state exit, without reviving the removed legacy protocols.
+- Ranked streak and Fibonacci reward implementation.
 - External security review before any relaxation of local-only/funding containment.
 
-## Unresolved policy decisions
+## Future policy decisions
 
 - Bonds and challenge-bond economics.
-- Payout recipient/split after claimant, challenger, or neither verdict.
 - Penalties, forfeitures, and reputation consequences for direct evidence faults.
-- Money-governing response and availability timeout durations.
-- Disconnect, abandonment, withheld evidence, and lost-key consequences.
-- Claim replacement and repeated/simultaneous dispute rules.
+- Whether governance should change future-match durations or economic parameters.
+- Archive delivery incentives and consequences beyond the current timeout outcome.
+- Simultaneous-claim admission beyond the current claimant/opponent sequence.
 - Fees, settlement incentives, and chain-finality/security assumptions.
 
 ## Validation run on 2026-10-01
@@ -69,13 +67,10 @@ the removed legacy surface, and unresolved settlement work.
 
 ## Known limitations
 
-- A responder who misses a trace deadline has no approved neutral or economic resolution.
-- A neutral verdict deliberately leaves local test escrow locked.
 - Journal publication commits only a hash; it supplies no retrieval channel or delivery proof.
 - A bisection step resolves the isolated disagreement and does not prove a globally earliest
   invalid transition if arbitrary traces diverge and reconverge.
-- The legacy result/timeout payout calls are removed; no current API maps a verdict to funds.
-- Arena runtime is 17,606 bytes, leaving 6,970 bytes of EIP-170 headroom at current optimizer settings.
+- The legacy result/timeout payout calls remain removed; the replacement APIs are intentionally incompatible.
 
 ## Relevant local commits
 
@@ -84,9 +79,8 @@ the removed legacy surface, and unresolved settlement work.
 - `d045537` — Phase C canonical dispute artifacts.
 - `f6c734b` — Phase D neutral one-step trace adjudication and witness integration.
 
-## Exact reason the project is not settlement-complete
+## Exact reason the project is not production-complete
 
-All deterministic technical work needed to decide an isolated execution step is
-implemented. Further escrow behavior requires the unresolved policy decisions
-above, which change player incentives and fund safety. No such policy has been
-invented in code.
+The local funded-state exits are implemented and tested. Ranked streaks,
+availability operations, client transaction flows, public-chain assumptions,
+and external security review remain before production use.

@@ -24,7 +24,7 @@ export function configHash(value: unknown): string {
   let bindingHash = ZERO32;
   if (c.mode === "escrow") {
     if (!object(c.authorization) || !exact(c.authorization, ["binding", "p1Signature", "p2Signature"]) || !hex(c.authorization.p1Signature, 65) || !hex(c.authorization.p2Signature, 65) || !object(c.authorization.binding) ||
-      !exact(c.authorization.binding, ["chainId", "arena", "challengeId", "genesis", "rulesHash", "p1", "p2", "p1Session", "p2Session", "stake", "responseWindow", "restrictedOpponent"])) throw new Error("Invalid authorization schema");
+      !exact(c.authorization.binding, ["chainId", "arena", "challengeId", "genesis", "rulesHash", "p1", "p2", "p1Session", "p2Session", "anteToken", "stake", "rewardAmount", "responseWindow", "restrictedOpponent"])) throw new Error("Invalid authorization schema");
     if (!c.authorization || c.authorization.binding.genesis !== c.matchId || c.authorization.binding.p1Session.toLowerCase() !== p1 || c.authorization.binding.p2Session.toLowerCase() !== p2) throw new Error("Descriptor delegation mismatch");
     bindingHash = hashGenesisBinding(c.authorization.binding);
   }

@@ -1,8 +1,8 @@
 # Crypto Fighter
 
-Crypto Fighter is a React/TypeScript experiment in deterministic two-player fighting-game simulation, signed input transcripts, and optimistic native-token escrow. Two browser peers exchange secp256k1-signed inputs over PeerJS and independently advance the same cumulative state.
+Crypto Fighter is a React/TypeScript experiment in deterministic two-player fighting-game simulation, signed input transcripts, and optimistic ERC-20 escrow. Two browser peers exchange secp256k1-signed inputs over PeerJS and independently advance the same cumulative state.
 
-> **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited escrow/adjudication prototype. The trace path can isolate and independently execute one disputed transition, but its neutral verdict has no payout effect and activated escrow has no general exit. The unsafe legacy result and gameplay-timeout payout APIs have been removed, not replaced. Do not use it with real funds. The browser sends no contract transactions. The deployment script permits only the in-process Hardhat network, and the contract constructor rejects chain IDs other than 31337. These are development restrictions, not a proof of settlement safety; a chain ID alone does not establish that funds are valueless.
+> **Prototype warning:** the off-chain game, settlement contracts, and transcript verifier are unaudited prototypes. The local arena now has tested exits for funded CFC and approved ERC-20 matches, but it is not production-safe and the browser still sends no contract transactions. Do not use it with real funds. Deployment permits only the in-process Hardhat network, and the contracts reject chain IDs other than 31337. These are development restrictions, not a security proof.
 
 Returning after time away? Start with the concise
 [project map](docs/PROJECT_MAP.md), then use its linked
@@ -11,8 +11,8 @@ Returning after time away? Start with the concise
 For contract/API names, the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md)
 is authoritative. The CFC supply, ranked streak, reward-reserve, treasury, and
 owner-to-DAO rules are specified separately in the
-[CFC monetary policy](docs/CFC_MONETARY_POLICY.md). The token and segregated CFC
-vault exist locally; arena integration and ranked rewards do not.
+[CFC monetary policy](docs/CFC_MONETARY_POLICY.md). The token, segregated vaults,
+and base match settlement exist locally; ranked streak rewards do not.
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
@@ -23,8 +23,8 @@ to even. Transcript v2 requires the canonical rules fingerprint; final-state and
 trace hashes share one ABI codec. Development v1 replays are intentionally
 unsupported. See [the numeric specification and behavioral comparison](docs/FIXED_POINT_PROTOCOL.md).
 Existing trace formats/codecs and the independent Solidity one-step rules engine
-use v2. Trace payout, non-response, and economic recovery remain unimplemented.
-Settlement stays disabled.
+use v2. Local-only trace payout, non-response, and economic recovery are implemented;
+the browser does not yet submit those transactions.
 
 ## Player flow
 
@@ -59,7 +59,7 @@ session keys to authorize the completed immutable escrow binding once. Later
 move signatures rely on that binding without repeating its fields. See
 [genesis authorization](docs/GENESIS_AUTHORIZATION.md) for the protocol and tested
 limits. The browser supports practice and explicitly loaded, independently verified
-escrow-authorized matches. Funding and production settlement remain disabled.
+escrow-authorized matches. Production deployment and browser-driven funding remain disabled.
 See [Phase B lifecycle and persistence](docs/PHASE_B.md) for admission and recovery guarantees,
 and [Phase C evidence-to-trace integration](docs/PHASE_C.md) for canonical reconstruction
 and self-contained dispute artifacts. [Phase D](docs/PHASE_D.md) documents neutral
@@ -259,7 +259,7 @@ This change does not authorize payouts or claim on-chain meaning for stateHash.
 
 ## Main wallets and session keys
 
-- **Main wallet:** injected EVM wallet and msg.sender for escrow. Its challenge/join transaction commits its session address and transfers native stake.
+- **Main wallet:** EVM wallet and msg.sender for escrow. Its challenge/join transaction commits its session address and deposits the snapshotted ERC-20 ante into a vault.
 - **Session key:** ephemeral browser-generated key for per-frame signatures. It pays no gas. Solidity can recover it from disclosed packets.
 
 Current trace functions derive participants from the stored P1/P2 main-wallet
@@ -274,52 +274,56 @@ protocol's authoritative context. The older optimistic result and gameplay-timeo
 payout functions were removed in Issue #9 because their evidence could not
 justify moving funds. See the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md).
 
-The current arena still accepts only the chain's native token through payable
-calls. `CryptoFighterCoin` and its segregated vault are implemented but are not
-wired into challenge/join/settlement. **Stablecoin arena support is not
-implemented.** There is no oracle, redemption, or stable-value mechanism.
+The arena accepts exact 1 CFC antes or an owner-approved conventional ERC-20 at
+its configured amount. CFC rewards are reserved before a challenge becomes
+joinable. Fee-on-transfer and rebasing assets are intentionally unsupported.
+Allowlisting a token does not provide an oracle, redemption, or stable-value guarantee.
 
 ### Challenge and join
 
-challenge requires non-zero native stake, matchId, P1 session address, the sole canonical rulesHash, and at least a 24-hour response window. rulesHash identifies the canonical game version; it does not configure gameplay. It stores an open challenge and context hash over chain ID, contract, challenge ID, P1 main wallet, stake, match ID, rules hash, P1 session key, and window. Optional expectedOpponent is stored/emitted but omitted from the initial context-hash calculation.
+`challenge` requires a fresh matchId, P1 session address, the canonical rulesHash,
+and either CFC or an approved token. It snapshots the asset, ante, one-CFC base
+reward, opponent restriction, and fixed 24-hour response window, reserves the
+reward, and deposits P1's ante.
 
-join requires Open status, a caller other than P1, exactly equal stake, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key (requiring distinct keys), makes the escrow Active but
+`join` requires Open status, a caller other than P1, the snapshotted ante, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key (requiring distinct keys), makes the escrow Active but
 not yet authorized for play, and freezes the full GenesisBinding. Its hash replaces
 the provisional matchContextHash. Both session authorizations must activate the
 genesis before current trace actions. Unactivated matches refund both deposits
 after the authorization deadline; their genesis reservations remain permanent.
 
-### Cancellation and the funded-state gap
+### Cancellation and settlement
 
-Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the stake. Active matches cannot use this cancellation path.
-
-After a joined match is authorized, no current function pays, penalizes, or
-refunds based on a gameplay result or trace verdict. This locked-funds gap is
-deliberate containment, not acceptable production behavior; Issue #4 owns safe
-funded-state exit semantics.
+Before join only P1 may cancel; after an unactivated join, anyone may trigger the
+deadline refund. Both paths create pull credits and release the reward reservation.
+Authorization opens a 24-hour game window. A timely trace claim starts a fresh
+24-hour response window; only a valid action that advances the dispute resets it.
+Permissionless deadline calls finalize an unchallenged trace, accept the sole
+midpoint responder, or produce no result when nobody responds. A winner receives
+their own ante plus the reserved CFC reward; the loser ante enters settled treasury.
+Draw and no-result outcomes send both antes to treasury and release the reward.
 
 ### Enforced on-chain versus trusted
 
 | Item | Treatment |
 | --- | --- |
-| Native stake/equal join stake | Enforced |
+| Snapshotted CFC/approved-token ante | Enforced by segregated vault accounting |
 | Main-wallet participants/optional P2 restriction | Enforced |
-| Non-zero identifiers/session keys and 24h minimum | Enforced |
+| Non-zero identifiers/session keys and fixed 24h windows | Enforced |
 | Session delegation | Inferred from a main wallet committing its own session address |
 | rulesHash | Must equal the sole canonical version fingerprint |
 | Canonical chain/full transcript | Not checked |
-| Isolated trace transition, packet chains, HP/timer/terminal result | Independently recomputed by `GameTransitionVerifier`; no payout consequence |
+| Isolated trace transition, packet chains, HP/timer/terminal result | Independently recomputed by `GameTransitionVerifier` |
 | Genesis-to-escrow authority | Both session keys sign the frozen binding once; moves retain genesis-only context |
-| Trace verdict economic effect | None; safe payout/refund/penalty policy is unresolved |
+| Trace economic effect | Winner/draw/no-result mapping is atomic and pull-based |
 
 ## Current Merkle trace and interactive bisection
 
 The current adjudication architecture uses **optimistic Merkle-committed
 execution, interactive bisection, and minimal on-chain transition verification**.
 Solidity must not receive or replay the complete match transcript. The current
-trace path can isolate and adjudicate a disputed transition, but it cannot
-finalize an unchallenged trace claim or move funds. Those rules remain future
-settlement work.
+trace path can isolate and adjudicate a disputed transition, finalize claims and
+timeouts, and atomically move vault accounting into pull credits or treasury.
 
 The prior README proposal is preserved and developed in
 [docs/EXECUTION_TRACE.md](docs/EXECUTION_TRACE.md), including the inspection findings,
@@ -354,20 +358,18 @@ the diagnostic CLI does not establish authoritative genesis activation and every
 Now implemented in addition: immutable escrow-bound genesis authorization,
 authorized trace roots, an off-chain authenticated bisection coordinator, and
 compact Solidity Merkle membership verification. On-chain root claims and interactive bisection turns/deadlines are also implemented
-(see the execution-trace document). Adjacent disputes now end in a neutral
-claimant/challenger/neither execution verdict. Authenticated non-response resolution,
-availability enforcement, and economic recovery remain pending. Trace claims
-have no payout/recovery entry point. The older continuation-packet and gameplay-
+(see the execution-trace document). Adjacent disputes select a surviving trace
+or no result; each surviving correction opens another response window. Authenticated
+non-response and economic recovery are implemented. General archive-availability
+enforcement remains pending. The older continuation-packet and gameplay-
 timeout payout APIs were removed rather than adapted. No full-transcript on-chain
 replay fallback is planned.
 
 ## Safety limitations
 
 - Experimental, unaudited contract; no real-fund safety claim.
-- Activated escrow has no general payout, penalty, or refund path.
-- Unchallenged trace claims and missed trace responses have no resolution rule.
-- The canonical rules fingerprint and one isolated step are enforced, but an
-  unchallenged claim and verdict consequence still require approved settlement policy.
+- Settlement availability still depends on someone submitting the relevant
+  permissionless deadline transaction.
 - Moves intentionally sign only genesis context; authorized use requires the one-time
   registered binding.
 - Solidity and browser signature recovery enforce low-S and v=27/28.
@@ -375,7 +377,7 @@ replay fallback is planned.
 - Input delay permits limited lookahead; commit-reveal is only proposed.
 - Session delegation now requires distinct session addresses.
 - UI covers only part of lifecycle and does not monitor deadlines.
-- CFC and its local accounting vault exist, but arena integration, stablecoins,
+- CFC and approved-token vaults are integrated locally, but ranked streaks,
   fees, upgrades, emergency recovery, and production operations are absent.
 
 ## Historical staged roadmap
@@ -494,10 +496,12 @@ used a different protocol and must not be treated as contract validation. Use
 contracts/CryptoFighterArena.sol  shared arena admission and trace context
 contracts/CryptoFighterCoin.sol   owner-issued 18-decimal CFC ERC-20
 contracts/CryptoFighterVault.sol  segregated CFC rewards/escrow/credits/treasury
+contracts/CryptoFighterTokenEscrow.sol approved ERC-20 escrow/credits/treasury
 contracts/GameTransitionVerifier.sol independent canonical one-step rules
-contracts/TraceDispute.sol        root claim, bisection, neutral adjudication
+contracts/TraceDispute.sol        root claim, bisection, correction, finalization
 hh/test/cfc-vault.cjs             CFC authority and accounting-isolation tests
 hh/test/match-lifecycle.cjs       challenge/join/cancel lifecycle tests
+hh/test/settlement.cjs            token exits, deadlines, and payout accounting
 hh/test/step-adjudication.cjs     Phase C-to-Solidity adversarial tests
 test/browser/gameplay.spec.mjs   local browser gameplay/replay checks
 tools/verify-match.mjs            CLI adapter for shared transcript verifier

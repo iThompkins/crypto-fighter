@@ -1,50 +1,48 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @notice Escrow admission and authenticated trace adjudication for Crypto Fighter.
-/// @dev Trace verdicts deliberately have no payout effect until funded-state exit
-///      semantics are specified and implemented.
-import "./TraceDispute.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {CryptoFighterVault} from "./CryptoFighterVault.sol";
+import {CryptoFighterTokenEscrow} from "./CryptoFighterTokenEscrow.sol";
+import {TraceDispute} from "./TraceDispute.sol";
 
-contract CryptoFighterArena is TraceDispute {
-    /// @notice Identifies the sole canonical game version; never match configuration.
-    /// @dev Must equal src/protocol.ts. Deployment tests check byte-for-byte parity.
+/// @notice Funded match admission, trace adjudication, and pull-based settlement.
+/// @dev Every financial term is snapshotted before either player can join.
+contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
     bytes32 public constant CANONICAL_RULES_HASH =
         0x45e7b6011925954ee1b15160173864f8deea010e005bd0c4dfca5fbc1d503a18;
-    /// @dev Temporary containment, not a settlement security proof. No override.
-    ///      This prototype must only be exercised with valueless local test funds.
-    constructor() {
-        require(block.chainid == 31337, "prototype: local chain only");
-    }
+    bytes32 public constant GENESIS_BINDING_TAG = keccak256("CryptoFighter.GenesisBinding.v2");
+    bytes32 public constant GENESIS_AUTHORIZATION_TAG = keccak256("CryptoFighter.GenesisAuthorization.v1");
+    uint64 public constant RESPONSE_WINDOW_SECONDS = 24 hours;
+    uint256 public constant CFC_ANTE = 1 ether;
+    uint256 public constant BASE_REWARD = 1 ether;
 
-    enum MatchStatus {
-        None,
-        Open,
-        Active,
-        Cancelled
-    }
+    enum MatchStatus { None, Open, Active, Cancelled, Settled }
+    enum SettlementResult { None, P1Win, P2Win, Draw, NoResult }
 
     struct Challenge {
-        address payable p1;
-        address payable p2;
-        uint256 stake;
+        address p1;
+        address p2;
+        address anteToken;
+        uint256 anteAmount;
+        uint256 rewardAmount;
+        bytes32 rewardReservationId;
         uint64 createdAt;
         uint64 joinedAt;
-        uint64 responseWindowSeconds;
+        uint64 gameDeadline;
         bytes32 matchId;
         bytes32 rulesHash;
         bytes32 matchContextHash;
-        // Ephemeral secp256k1 session-key addresses each wallet delegated by
-        // committing them in its own (wallet-signed) challenge/join tx.
         address p1SessionKey;
         address p2SessionKey;
-        // Optional: restrict who may join to a specific opponent main wallet.
         address restrictedOpponent;
         MatchStatus status;
+        SettlementResult result;
     }
 
-    // Immutable even after stake is refunded. All move packets still sign
-    // only their genesis and move-chain fields; authorization happens once here.
     struct GenesisBinding {
         uint256 chainId;
         address arena;
@@ -55,20 +53,64 @@ contract CryptoFighterArena is TraceDispute {
         address p2;
         address p1Session;
         address p2Session;
+        address anteToken;
         uint256 stake;
+        uint256 rewardAmount;
         uint256 responseWindow;
         address restrictedOpponent;
     }
 
-    bytes32 public constant GENESIS_BINDING_TAG = keccak256("CryptoFighter.GenesisBinding.v1");
-    bytes32 public constant GENESIS_AUTHORIZATION_TAG = keccak256("CryptoFighter.GenesisAuthorization.v1");
+    CryptoFighterVault public immutable cfcVault;
+    CryptoFighterTokenEscrow public immutable tokenEscrow;
+    IERC20 public immutable cfc;
+
+    uint256 public nextChallengeId = 1;
+    mapping(uint256 => Challenge) internal challenges;
     mapping(bytes32 => uint256) public challengeForGenesis;
     mapping(uint256 => GenesisBinding) private genesisBindings;
     mapping(uint256 => bool) public genesisAuthorized;
     mapping(uint256 => uint64) public genesisAuthorizationDeadline;
 
-    event GenesisAuthorized(uint256 indexed challengeId, bytes32 indexed genesis, bytes32 bindingHash);
+    event ChallengeCreated(
+        uint256 indexed challengeId,
+        address indexed challenger,
+        address indexed anteToken,
+        uint256 anteAmount,
+        uint256 rewardAmount,
+        bytes32 matchId,
+        bytes32 rulesHash,
+        bytes32 matchContextHash,
+        address p1SessionKey,
+        address restrictedOpponent
+    );
+    event ChallengeJoined(uint256 indexed challengeId, address indexed joiner, address p2SessionKey);
+    event ChallengeCancelled(uint256 indexed challengeId);
+    event GenesisAuthorized(uint256 indexed challengeId, bytes32 indexed genesis, bytes32 bindingHash, uint256 gameDeadline);
     event UnactivatedMatchRefunded(uint256 indexed challengeId);
+    event MatchSettled(uint256 indexed challengeId, SettlementResult result, address indexed winner);
+
+    constructor(
+        CryptoFighterVault cfcVault_,
+        CryptoFighterTokenEscrow tokenEscrow_,
+        address initialOwner
+    ) Ownable(initialOwner) {
+        require(block.chainid == 31337, "prototype: local chain only");
+        require(address(cfcVault_).code.length > 0, "invalid CFC vault");
+        require(address(tokenEscrow_).code.length > 0, "invalid token escrow");
+        cfcVault = cfcVault_;
+        tokenEscrow = tokenEscrow_;
+        cfc = cfcVault_.cfc();
+    }
+
+    /// @notice Complete the two-step operator handoff after both vault owners nominate this arena.
+    function acceptVaultOperatorRoles() external onlyOwner {
+        cfcVault.acceptOperator();
+        tokenEscrow.acceptOperator();
+    }
+
+    function getChallenge(uint256 challengeId) external view returns (Challenge memory) {
+        return challenges[challengeId];
+    }
 
     function getGenesisBinding(uint256 challengeId) external view returns (GenesisBinding memory binding, bool authorized) {
         return (genesisBindings[challengeId], genesisAuthorized[challengeId]);
@@ -80,6 +122,93 @@ contract CryptoFighterArena is TraceDispute {
         return keccak256(abi.encode(GENESIS_AUTHORIZATION_TAG, challenges[challengeId].matchContextHash, slot));
     }
 
+    function challenge(
+        bytes32 matchId,
+        bytes32 rulesHash,
+        address p1SessionKey,
+        address expectedOpponent,
+        address anteToken
+    ) external nonReentrant returns (uint256 challengeId) {
+        require(matchId != bytes32(0), "matchId required");
+        require(challengeForGenesis[matchId] == 0, "genesis already registered");
+        require(rulesHash == CANONICAL_RULES_HASH, "unsupported canonical rules");
+        require(p1SessionKey != address(0), "session key required");
+
+        uint256 anteAmount = anteToken == address(cfc)
+            ? CFC_ANTE
+            : tokenEscrow.requiredAnte(anteToken);
+        challengeId = nextChallengeId++;
+        bytes32 reservationId = keccak256(abi.encode(address(this), challengeId, matchId));
+        bytes32 matchContextHash = keccak256(abi.encode(
+            block.chainid,
+            address(this),
+            challengeId,
+            msg.sender,
+            anteToken,
+            anteAmount,
+            BASE_REWARD,
+            matchId,
+            rulesHash,
+            p1SessionKey,
+            expectedOpponent,
+            RESPONSE_WINDOW_SECONDS
+        ));
+
+        challengeForGenesis[matchId] = challengeId;
+        challenges[challengeId] = Challenge({
+            p1: msg.sender,
+            p2: address(0),
+            anteToken: anteToken,
+            anteAmount: anteAmount,
+            rewardAmount: BASE_REWARD,
+            rewardReservationId: reservationId,
+            createdAt: uint64(block.timestamp),
+            joinedAt: 0,
+            gameDeadline: 0,
+            matchId: matchId,
+            rulesHash: rulesHash,
+            matchContextHash: matchContextHash,
+            p1SessionKey: p1SessionKey,
+            p2SessionKey: address(0),
+            restrictedOpponent: expectedOpponent,
+            status: MatchStatus.Open,
+            result: SettlementResult.None
+        });
+
+        cfcVault.reserveReward(reservationId, BASE_REWARD);
+        _depositAnte(anteToken, matchId, msg.sender, anteAmount);
+
+        emit ChallengeCreated(
+            challengeId, msg.sender, anteToken, anteAmount, BASE_REWARD, matchId,
+            rulesHash, matchContextHash, p1SessionKey, expectedOpponent
+        );
+    }
+
+    function join(uint256 challengeId, address p2SessionKey) external nonReentrant {
+        Challenge storage c = challenges[challengeId];
+        require(c.status == MatchStatus.Open, "not open");
+        require(msg.sender != c.p1, "cannot join self");
+        require(p2SessionKey != address(0), "session key required");
+        require(p2SessionKey != c.p1SessionKey, "distinct session keys required");
+        require(c.restrictedOpponent == address(0) || c.restrictedOpponent == msg.sender, "opponent locked");
+
+        _depositAnte(c.anteToken, c.matchId, msg.sender, c.anteAmount);
+        c.p2 = msg.sender;
+        c.joinedAt = uint64(block.timestamp);
+        c.p2SessionKey = p2SessionKey;
+        c.status = MatchStatus.Active;
+        GenesisBinding memory binding = GenesisBinding(
+            block.chainid, address(this), challengeId, c.matchId, c.rulesHash,
+            c.p1, c.p2, c.p1SessionKey, c.p2SessionKey, c.anteToken,
+            c.anteAmount, c.rewardAmount, RESPONSE_WINDOW_SECONDS, c.restrictedOpponent
+        );
+        genesisBindings[challengeId] = binding;
+        c.matchContextHash = keccak256(abi.encode(GENESIS_BINDING_TAG, binding));
+        genesisAuthorizationDeadline[challengeId] = uint64(block.timestamp) + RESPONSE_WINDOW_SECONDS;
+
+        emit ChallengeJoined(challengeId, msg.sender, p2SessionKey);
+    }
+
     function authorizeGenesis(uint256 challengeId, bytes calldata p1Signature, bytes calldata p2Signature) external {
         Challenge storage c = challenges[challengeId];
         require(c.status == MatchStatus.Active, "not active");
@@ -88,7 +217,18 @@ contract CryptoFighterArena is TraceDispute {
         require(_recover(genesisAuthorizationDigest(challengeId, 1), p1Signature) == c.p1SessionKey, "bad P1 authorization");
         require(_recover(genesisAuthorizationDigest(challengeId, 2), p2Signature) == c.p2SessionKey, "bad P2 authorization");
         genesisAuthorized[challengeId] = true;
-        emit GenesisAuthorized(challengeId, c.matchId, c.matchContextHash);
+        c.gameDeadline = uint64(block.timestamp) + RESPONSE_WINDOW_SECONDS;
+        emit GenesisAuthorized(challengeId, c.matchId, c.matchContextHash, c.gameDeadline);
+    }
+
+    function cancelOpenChallenge(uint256 challengeId) external nonReentrant {
+        Challenge storage c = challenges[challengeId];
+        require(c.status == MatchStatus.Open, "not open");
+        require(msg.sender == c.p1, "only challenger");
+        c.status = MatchStatus.Cancelled;
+        _creditAnte(c, c.p1);
+        cfcVault.releaseReward(c.rewardReservationId);
+        emit ChallengeCancelled(challengeId);
     }
 
     function refundUnactivatedMatch(uint256 challengeId) external nonReentrant {
@@ -96,183 +236,26 @@ contract CryptoFighterArena is TraceDispute {
         require(c.status == MatchStatus.Active, "not active");
         require(!genesisAuthorized[challengeId], "genesis already authorized");
         require(block.timestamp > genesisAuthorizationDeadline[challengeId], "authorization window open");
-        uint256 refund = c.stake;
-        c.stake = 0;
         c.status = MatchStatus.Cancelled;
+        _creditAnte(c, c.p1);
+        _creditAnte(c, c.p2);
+        cfcVault.releaseReward(c.rewardReservationId);
         emit UnactivatedMatchRefunded(challengeId);
-        _safeTransfer(c.p1, refund);
-        _safeTransfer(c.p2, refund);
     }
 
-    struct PlayerStats {
-        uint64 matchesCreated;
-        uint64 matchesJoined;
-        uint256 totalStakePlayed;
-        uint64 lastActiveAt;
-    }
-
-    uint64 public constant MIN_RESPONSE_WINDOW_SECONDS = 24 hours;
-
-    uint256 public nextChallengeId = 1;
-    mapping(uint256 => Challenge) internal challenges;
-    mapping(address => PlayerStats) public playerStats;
-
-    /// @notice Full challenge record (auto-getter omitted: struct is too large to unpack).
-    function getChallenge(uint256 challengeId) external view returns (Challenge memory) {
-        return challenges[challengeId];
-    }
-
-    bool private locked;
-
-    event ChallengeCreated(
-        uint256 indexed challengeId,
-        address indexed challenger,
-        uint256 stake,
-        bytes32 matchId,
-        bytes32 rulesHash,
-        bytes32 matchContextHash,
-        address p1SessionKey,
-        address restrictedOpponent,
-        uint64 responseWindowSeconds
-    );
-
-    event ChallengeJoined(
-        uint256 indexed challengeId,
-        address indexed joiner,
-        address p2SessionKey
-    );
-
-    event ChallengeCancelled(uint256 indexed challengeId);
-
-    modifier nonReentrant() {
-        require(!locked, "reentrant");
-        locked = true;
-        _;
-        locked = false;
-    }
-
-    /// @param matchId Client-generated bytes32 the session keys sign packets against.
-    /// @param p1SessionKey Challenger's ephemeral session-key address (delegated by this tx).
-    /// @param expectedOpponent Optional P2 main wallet lock; address(0) leaves the match open.
-    function challenge(
-        bytes32 matchId,
-        bytes32 rulesHash,
-        address p1SessionKey,
-        address expectedOpponent,
-        uint64 responseWindowSeconds
-    ) external payable returns (uint256 challengeId) {
-        require(msg.value > 0, "stake required");
-        require(matchId != bytes32(0), "matchId required");
-        require(challengeForGenesis[matchId] == 0, "genesis already registered");
-        require(rulesHash == CANONICAL_RULES_HASH, "unsupported canonical rules");
-        require(p1SessionKey != address(0), "session key required");
-        require(
-            responseWindowSeconds >= MIN_RESPONSE_WINDOW_SECONDS,
-            "response window too short"
-        );
-
-        challengeId = nextChallengeId++;
-        challengeForGenesis[matchId] = challengeId;
-        uint64 window = responseWindowSeconds;
-
-        bytes32 matchContextHash = keccak256(
-            abi.encode(
-                block.chainid,
-                address(this),
-                challengeId,
-                msg.sender,
-                msg.value,
-                matchId,
-                rulesHash,
-                p1SessionKey,
-                window
-            )
-        );
-
+    function expireUnclaimedMatch(uint256 challengeId) external {
         Challenge storage c = challenges[challengeId];
-        c.p1 = payable(msg.sender);
-        c.stake = msg.value;
-        c.createdAt = uint64(block.timestamp);
-        c.responseWindowSeconds = window;
-        c.matchId = matchId;
-        c.rulesHash = rulesHash;
-        c.matchContextHash = matchContextHash;
-        c.p1SessionKey = p1SessionKey;
-        c.restrictedOpponent = expectedOpponent;
-        c.status = MatchStatus.Open;
-
-        PlayerStats storage s = playerStats[msg.sender];
-        s.matchesCreated += 1;
-        s.lastActiveAt = uint64(block.timestamp);
-
-        emit ChallengeCreated(
-            challengeId,
-            msg.sender,
-            msg.value,
-            matchId,
-            rulesHash,
-            matchContextHash,
-            p1SessionKey,
-            expectedOpponent,
-            window
-        );
-    }
-
-    /// @param p2SessionKey Joiner's own ephemeral session-key address (delegated by this tx).
-    function join(uint256 challengeId, address p2SessionKey) external payable {
-        Challenge storage c = challenges[challengeId];
-        require(c.status == MatchStatus.Open, "not open");
-        require(msg.sender != c.p1, "cannot join self");
-        require(msg.value == c.stake, "stake mismatch");
-        require(p2SessionKey != address(0), "session key required");
-        require(p2SessionKey != c.p1SessionKey, "distinct session keys required");
-        require(
-            c.restrictedOpponent == address(0) || c.restrictedOpponent == msg.sender,
-            "opponent locked"
-        );
-
-        c.p2 = payable(msg.sender);
-        c.joinedAt = uint64(block.timestamp);
-        c.p2SessionKey = p2SessionKey;
-        c.status = MatchStatus.Active;
-        GenesisBinding memory binding = GenesisBinding(
-            block.chainid, address(this), challengeId, c.matchId, c.rulesHash,
-            c.p1, c.p2, c.p1SessionKey, c.p2SessionKey, c.stake,
-            c.responseWindowSeconds, c.restrictedOpponent
-        );
-        genesisBindings[challengeId] = binding;
-        c.matchContextHash = keccak256(abi.encode(GENESIS_BINDING_TAG, binding));
-        genesisAuthorizationDeadline[challengeId] = uint64(block.timestamp) + c.responseWindowSeconds;
-
-        PlayerStats storage p1Stats = playerStats[c.p1];
-        PlayerStats storage p2Stats = playerStats[msg.sender];
-        p1Stats.totalStakePlayed += c.stake;
-        p2Stats.matchesJoined += 1;
-        p2Stats.totalStakePlayed += msg.value;
-        p1Stats.lastActiveAt = uint64(block.timestamp);
-        p2Stats.lastActiveAt = uint64(block.timestamp);
-
-        emit ChallengeJoined(challengeId, msg.sender, p2SessionKey);
-    }
-
-    function cancelOpenChallenge(uint256 challengeId) external nonReentrant {
-        Challenge storage c = challenges[challengeId];
-        require(c.status == MatchStatus.Open, "not open");
-        require(msg.sender == c.p1, "only challenger");
-
-        c.status = MatchStatus.Cancelled;
-        uint256 refund = c.stake;
-        c.stake = 0;
-
-        emit ChallengeCancelled(challengeId);
-        _safeTransfer(c.p1, refund);
+        require(c.status == MatchStatus.Active && genesisAuthorized[challengeId], "not active");
+        require(traceGames[challengeId].phase == TracePhase.None, "trace already claimed");
+        require(block.timestamp > c.gameDeadline, "game window open");
+        _settle(challengeId, SettlementResult.NoResult);
     }
 
     function _traceContext(uint256 id) internal view override returns (address, address, bytes32, uint256) {
         Challenge storage c = challenges[id];
         require(c.status == MatchStatus.Active, "not active");
         require(genesisAuthorized[id], "genesis not authorized");
-        return (c.p1, c.p2, c.matchContextHash, c.responseWindowSeconds);
+        return (c.p1, c.p2, c.matchContextHash, RESPONSE_WINDOW_SECONDS);
     }
 
     function _traceEvidence(uint256 id) internal view override returns (bytes32, address, address) {
@@ -281,9 +264,72 @@ contract CryptoFighterArena is TraceDispute {
         return (c.matchId, c.p1SessionKey, c.p2SessionKey);
     }
 
-    function _safeTransfer(address payable to, uint256 amount) internal {
-        if (amount == 0) return;
-        (bool ok, ) = to.call{value: amount}("");
-        require(ok, "transfer failed");
+    function _beforeTraceClaim(uint256 id) internal view override {
+        Challenge storage c = challenges[id];
+        require(c.status == MatchStatus.Active && genesisAuthorized[id], "not claimable");
+        require(block.timestamp <= c.gameDeadline, "game deadline passed");
+    }
+
+    function _onTraceOutcome(uint256 id, uint8 outcome) internal override {
+        require(outcome > 0 && outcome <= 3, "unsupported outcome");
+        _settle(id, SettlementResult(outcome));
+    }
+
+    function _onTraceNoResult(uint256 id) internal override {
+        _settle(id, SettlementResult.NoResult);
+    }
+
+    function _settle(uint256 id, SettlementResult result) private {
+        Challenge storage c = challenges[id];
+        require(c.status == MatchStatus.Active, "not active");
+        require(result != SettlementResult.None, "missing result");
+        c.status = MatchStatus.Settled;
+        c.result = result;
+
+        address winner;
+        if (result == SettlementResult.P1Win) {
+            winner = c.p1;
+            _creditAnte(c, c.p1);
+            _forfeitAnte(c, c.p2);
+            cfcVault.creditReward(c.rewardReservationId, c.p1);
+        } else if (result == SettlementResult.P2Win) {
+            winner = c.p2;
+            _forfeitAnte(c, c.p1);
+            _creditAnte(c, c.p2);
+            cfcVault.creditReward(c.rewardReservationId, c.p2);
+        } else {
+            _forfeitAnte(c, c.p1);
+            _forfeitAnte(c, c.p2);
+            cfcVault.releaseReward(c.rewardReservationId);
+        }
+        emit MatchSettled(id, result, winner);
+    }
+
+    function _depositAnte(address token, bytes32 matchId, address player, uint256 amount) private {
+        if (token == address(cfc)) {
+            cfcVault.depositEscrow(matchId, player, amount);
+        } else {
+            tokenEscrow.depositEscrow(IERC20(token), matchId, player, amount);
+        }
+    }
+
+    function _creditAnte(Challenge storage c, address player) private {
+        if (c.anteToken == address(cfc)) {
+            cfcVault.creditEscrow(c.matchId, player, c.anteAmount);
+        } else {
+            tokenEscrow.creditEscrow(IERC20(c.anteToken), c.matchId, player, c.anteAmount);
+        }
+    }
+
+    function _forfeitAnte(Challenge storage c, address player) private {
+        if (c.anteToken == address(cfc)) {
+            cfcVault.forfeitEscrow(c.matchId, player, c.anteAmount);
+        } else {
+            tokenEscrow.forfeitEscrow(IERC20(c.anteToken), c.matchId, player, c.anteAmount);
+        }
+    }
+
+    function renounceOwnership() public view override onlyOwner {
+        revert("ownership renunciation disabled");
     }
 }

@@ -5,6 +5,7 @@ const { execFileSync } = require("node:child_process");
 const { mkdtempSync, readFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { ethers, network } = require("hardhat");
+const { CFC, deployArena } = require("./helpers/arena-fixture.cjs");
 let genesis;
 before(async function () {
   await import(pathToFileURL(path.resolve(__dirname, "../../tools/register-types.mjs")).href);
@@ -20,12 +21,12 @@ async function rejected(promise, reason) {
 }
 async function setup(options = {}) {
   const [p1, p2, relayer] = await ethers.getSigners();
-  const arena = await (await ethers.getContractFactory("CryptoFighterArena")).deploy();
+  const { arena, coin, vault } = await deployArena([p1, p2]);
   const matchId = options.matchId ?? ethers.hexlify(ethers.randomBytes(32));
   const s1 = options.s1 ?? ethers.Wallet.createRandom(), s2 = options.s2 ?? ethers.Wallet.createRandom();
-  const stake = 1000n;
-  await (await arena.connect(p1).challenge(matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, 86400, { value: stake })).wait();
-  const joined = await (await arena.connect(p2).join(1, s2.address, { value: stake })).wait();
+  const stake = CFC;
+  await (await arena.connect(p1).challenge(matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress())).wait();
+  const joined = await (await arena.connect(p2).join(1, s2.address)).wait();
   const locator = { chainId: "31337", arena: await arena.getAddress(), challengeId: "1" };
   const record = await genesis.readGenesisRecord(ethers.provider, locator, joined.blockNumber);
   const auth = {
@@ -33,7 +34,7 @@ async function setup(options = {}) {
     p1Signature: s1.signingKey.sign(genesis.genesisAuthorizationDigest(record.binding, 1)).serialized,
     p2Signature: s2.signingKey.sign(genesis.genesisAuthorizationDigest(record.binding, 2)).serialized,
   };
-  return { arena, p1, p2, relayer, matchId, s1, s2, stake, locator, record, auth };
+  return { arena, coin, vault, p1, p2, relayer, matchId, s1, s2, stake, locator, record, auth };
 }
 const activate = (m) => m.arena.connect(m.relayer).authorizeGenesis(1, m.auth.p1Signature, m.auth.p2Signature);
 
@@ -100,10 +101,11 @@ describe("Authoritative genesis binding", function () {
 
   it("rejects a registered genesis even after cancellation", async function () {
     const [p1] = await ethers.getSigners();
-    const arena = await (await ethers.getContractFactory("CryptoFighterArena")).deploy();
+    const { arena, coin } = await deployArena([p1]);
     const matchId = ethers.hexlify(ethers.randomBytes(32));
     const rulesHash = await arena.CANONICAL_RULES_HASH();
-    const open = () => arena.challenge(matchId, rulesHash, p1.address, ethers.ZeroAddress, 86400, { value: 1n });
+    const cfcAddress = await coin.getAddress();
+    const open = () => arena.challenge(matchId, rulesHash, p1.address, ethers.ZeroAddress, cfcAddress);
     await (await open()).wait();
     await rejected(open(), "genesis already registered");
     await (await arena.cancelOpenChallenge(1)).wait();
@@ -123,7 +125,8 @@ describe("Authoritative genesis binding", function () {
     const m = await setup();
     const changes = {
       chainId: "1", challengeId: "2", genesis: ethers.id("other-genesis"),
-      p1: m.relayer.address, stake: "1001", responseWindow: "86401", restrictedOpponent: ethers.ZeroAddress,
+      p1: m.relayer.address, anteToken: m.relayer.address, stake: "1001", rewardAmount: "1001",
+      responseWindow: "86401", restrictedOpponent: ethers.ZeroAddress,
     };
     for (const [field, value] of Object.entries(changes)) {
       const altered = { ...m.auth.binding, [field]: value };
@@ -146,10 +149,9 @@ describe("Authoritative genesis binding", function () {
     await network.provider.send("evm_setNextBlockTimestamp", [Number(deadline)]);
     await rejected(m.arena.refundUnactivatedMatch(1), "authorization window open");
     await rejected(activate(m), "authorization expired");
-    const p1Balance = await ethers.provider.getBalance(m.p1.address), p2Balance = await ethers.provider.getBalance(m.p2.address);
     await (await m.arena.connect(m.relayer).refundUnactivatedMatch(1)).wait();
-    assert.equal(await ethers.provider.getBalance(m.p1.address), p1Balance + m.stake);
-    assert.equal(await ethers.provider.getBalance(m.p2.address), p2Balance + m.stake);
+    assert.equal(await m.vault.playerCredits(m.p1.address), m.stake);
+    assert.equal(await m.vault.playerCredits(m.p2.address), m.stake);
     assert.equal((await m.arena.getGenesisBinding(1)).binding.stake, m.stake);
     assert.equal(await m.arena.challengeForGenesis(m.matchId), 1n);
     await rejected(m.arena.refundUnactivatedMatch(1), "not active");

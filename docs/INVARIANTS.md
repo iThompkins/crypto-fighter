@@ -172,26 +172,26 @@ the length of the match.
 [`src/onchain-dispute.ts`](../src/onchain-dispute.ts), and
 [`hh/test/step-adjudication.cjs`](../hh/test/step-adjudication.cjs).
 
-## INV-13 — Trace verdicts do not authorize real funds
+## INV-13 — Local settlement does not authorize real-fund deployment
 
-**Rule:** The browser sends no contract transactions, deployment remains limited
-to the in-process Hardhat chain, and a trace verdict has no payout or refund
-effect. The older payout functions have been removed.
+**Rule:** The browser sends no contract transactions and deployment remains
+limited to the in-process Hardhat chain. Trace outcomes affect only the new
+local vault-accounting state machine; the older payout functions remain removed.
 
-**Why it matters:** Settlement rules, evidence availability, non-response, and a
-safe exit from every funded state have not been solved.
+**Why it matters:** Tested local settlement is not an audit, availability system,
+public-chain deployment plan, or authorization to use real assets.
 
 **Where it is enforced/tested:** [`src/App.tsx`](../src/App.tsx),
 [`src/chain.ts`](../src/chain.ts),
 [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol),
-[`hh/test/match-lifecycle.cjs`](../hh/test/match-lifecycle.cjs), and
+[`hh/test/settlement.cjs`](../hh/test/settlement.cjs), and
 [`hh/test/deployment.cjs`](../hh/test/deployment.cjs).
 
 ## Important missing guarantee
 
-Every funded state should eventually have a safe, objective exit, even if one
-player disappears. The current trace path does not provide that guarantee.
-Silence or a `Neither` verdict can leave local test escrow locked.
+Every funded contract state has a permissionless local exit, including player
+silence and a `Neither` verdict. Progress still requires someone to submit the
+deadline transaction; the browser does not yet monitor or send it.
 
 ## INV-14 — Evidence properties and failure states remain distinct
 

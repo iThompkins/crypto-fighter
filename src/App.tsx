@@ -692,7 +692,7 @@ export default function App() {
       const bundle = await buildEvidenceBundle(await live.exportEvidence(), escrow.record);
       const witness = await prepareTraceClaim(bundle, escrow.record);
       downloadText(`trace-claim-${bundle.reconstruction.context.slice(2, 10)}.json`, canonicalJson(witness));
-      log("Exported an independently authorized trace-claim witness; settlement remains disabled.");
+      log("Exported an authorized trace-claim witness. This browser does not submit settlement transactions.");
     } catch (error) { setLastError(String(error)); }
   }
 

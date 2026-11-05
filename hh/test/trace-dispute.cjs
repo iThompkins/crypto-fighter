@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { ethers, network } = require('hardhat');
+const { CFC, deployArena } = require('./helpers/arena-fixture.cjs');
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const tag = (s) => ethers.id(`CryptoFighter:fixed-point-trace-v2:${s}`);
 const hash = (types, values) => ethers.keccak256(abi.encode(types, values));
@@ -29,11 +30,11 @@ async function reject(p, reason) {
 }
 async function fixture(divergence = 151) {
   const [p1,p2,other] = await ethers.getSigners();
-  const arena = await (await ethers.getContractFactory('CryptoFighterArena')).deploy();
+  const {arena,coin,vault} = await deployArena([p1,p2]);
   const sessions = [ethers.Wallet.createRandom(), ethers.Wallet.createRandom()];
   const genesis = ethers.randomBytes(32);
-  await arena.challenge(genesis, await arena.CANONICAL_RULES_HASH(), sessions[0].address, p2.address, 86400, {value:1});
-  await arena.connect(p2).join(1, sessions[1].address, {value:1});
+  await arena.connect(p1).challenge(genesis, await arena.CANONICAL_RULES_HASH(), sessions[0].address, p2.address, await coin.getAddress());
+  await arena.connect(p2).join(1, sessions[1].address);
   await arena.authorizeGenesis(1, sessions[0].signingKey.sign(await arena.genesisAuthorizationDigest(1,1)).serialized, sessions[1].signingKey.sign(await arena.genesisAuthorizationDigest(1,2)).serialized);
   const context = (await arena.getChallenge(1)).matchContextHash;
   const start = {...state(0), terminal:false, outcome:0};
@@ -41,10 +42,12 @@ async function fixture(divergence = 151) {
   a[0] = checkpoint(await arena.hashTraceState(start));
   a[300] = checkpoint(await arena.hashTraceState(state()));
   const b = a.map((c,i) => i < divergence ? {...c} : {...c, stateHash:ethers.id(`other-${i}`)});
-  return {arena,p1,p2,other,sessions,context,a:tree(context,a),b:tree(context,b)};
+  const challengerState = {...state(), outcome:2};
+  b[300] = checkpoint(await arena.hashTraceState(challengerState));
+  return {arena,coin,vault,p1,p2,other,sessions,context,a:tree(context,a),b:tree(context,b),challengerState};
 }
 async function claim(m) { await m.arena.claimTrace(1,m.a.root,m.a.open(0),m.a.open(300),state()); }
-async function challenge(m) { await m.arena.connect(m.p2).challengeTrace(1,m.b.root,m.b.open(0),m.b.open(300)); }
+async function challenge(m) { await m.arena.connect(m.p2).challengeTrace(1,m.b.root,m.b.open(0),m.b.open(300),m.challengerState); }
 
 describe('On-chain authenticated trace bisection', function () {
   it('preserves equal(low), unequal(high) through both response orders and isolates one transition', async function () {
@@ -68,7 +71,7 @@ describe('On-chain authenticated trace bisection', function () {
       }
       assert.equal(g.low,BigInt(divergence-1)); assert.equal(g.high,BigInt(divergence)); assert.ok(g.round <= 9n);
       await reject(m.arena.revealMidpoint(1,g.round,m.a.open(divergence)), 'not bisecting');
-      assert.equal(await ethers.provider.getBalance(await m.arena.getAddress()),2n);
+      assert.equal(await m.vault.totalActiveEscrow(),2n*CFC);
     }
   });
   it('rejects invalid endpoints, metadata, outsider and duplicate claims', async function () {
@@ -78,12 +81,12 @@ describe('On-chain authenticated trace bisection', function () {
     await reject(m.arena.claimTrace(1,m.a.root,m.a.open(0),m.a.open(300),{...state(),outcome:1}),'terminal state mismatch');
     await claim(m);
     await reject(m.arena.claimTrace(1,m.a.root,m.a.open(0),m.a.open(300),state()),'trace already claimed');
-    await reject(m.arena.challengeTrace(1,m.b.root,m.b.open(0),m.b.open(300)),'only trace opponent');
-    await reject(m.arena.connect(m.p2).challengeTrace(1,m.a.root,m.a.open(0),m.a.open(300)),'trace endpoints equal');
+    await reject(m.arena.challengeTrace(1,m.b.root,m.b.open(0),m.b.open(300),m.challengerState),'only trace opponent');
+    await reject(m.arena.connect(m.p2).challengeTrace(1,m.a.root,m.a.open(0),m.a.open(300),state()),'trace endpoints equal');
     const wrong = tree(ethers.id('other context'),m.b.checkpoints);
-    await reject(m.arena.connect(m.p2).challengeTrace(1,wrong.root,wrong.open(0),wrong.open(300)),'invalid trace opening');
+    await reject(m.arena.connect(m.p2).challengeTrace(1,wrong.root,wrong.open(0),wrong.open(300),m.challengerState),'invalid trace opening');
     await challenge(m);
-    await reject(m.arena.connect(m.p2).challengeTrace(1,m.b.root,m.b.open(0),m.b.open(300)),'trace not challengeable');
+    await reject(m.arena.connect(m.p2).challengeTrace(1,m.b.root,m.b.open(0),m.b.open(300),m.challengerState),'trace not challengeable');
   });
   it('rejects invalid, duplicate, stale-round and outsider responses without extending the clock', async function () {
     const m = await fixture(); await claim(m); await challenge(m);
