@@ -197,6 +197,8 @@ from economic consequences.
   conflicting branch.
 - Fixed-length traces, Merkle roots, and proofs for individual checkpoints.
 - A local contract dispute that bisects two traces and recalculates one step.
+- A local-only owner-issued CFC ERC-20 and segregated vault for available and
+  reserved rewards, active CFC escrow, player credits, and settled treasury.
 
 ## What is not built today
 
@@ -205,7 +207,8 @@ from economic consequences.
   `Neither` verdict.
 - A guaranteed exit from every state in which test funds are locked.
 - A production model for chain finality, reorganizations, or trusted RPC data.
-- Public-chain deployment, real-money use, token economics, or reputation.
+- Arena/CFC integration, stablecoin escrow, ranked streak execution,
+  public-chain deployment, real-money use, or reputation.
 
 ## The current contract boundary
 
@@ -236,6 +239,7 @@ the exact [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-l
 | Trace creation | [`src/evidence-trace.ts`](../src/evidence-trace.ts), [`src/execution-trace.ts`](../src/execution-trace.ts) | Checkpoints, roots, proofs, and dispute-ready evidence. |
 | Trace disagreement | [`src/bisection.ts`](../src/bisection.ts), [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol) | Midpoint comparison, deadlines, and the neutral verdict. |
 | One-step calculation | [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol), [`src/onchain-dispute.ts`](../src/onchain-dispute.ts) | Contract game rules and preparation of the isolated-step data. |
+| CFC and accounting | [`contracts/CryptoFighterCoin.sol`](../contracts/CryptoFighterCoin.sol), [`contracts/CryptoFighterVault.sol`](../contracts/CryptoFighterVault.sol), [`CFC_MONETARY_POLICY.md`](CFC_MONETARY_POLICY.md) | Owner-issued CFC, reward reservations, CFC escrow, player credits, settled treasury, and future owner/DAO handoff primitives. Not yet connected to the arena. |
 | Evidence and chain trust | [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md), [`PHASE_B.md`](PHASE_B.md), [`PHASE_C.md`](PHASE_C.md) | Required evidence, retention responsibility, availability failures, RPC/finality assumptions, and reorg handling. |
 | Safety boundary | [`PROTOCOL_BOUNDARY.md`](PROTOCOL_BOUNDARY.md), [`INVARIANTS.md`](INVARIANTS.md), [`ROADMAP.md`](ROADMAP.md) | Current/legacy API status, rules changes must preserve, and work that remains. |
 

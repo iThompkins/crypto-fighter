@@ -1,9 +1,10 @@
 # Roadmap
 
 Implemented now: local gameplay, durable evidence, trace comparison, and neutral
-one-step adjudication.
+one-step adjudication, plus the local-only CFC token and segregated CFC vault.
 
-Not implemented: safe settlement.
+Not implemented: arena/token integration, safe settlement, stablecoin escrow,
+or ranked streak execution.
 
 The current trace path, removed legacy surface, and unresolved work are
 classified in the [protocol-boundary guide](PROTOCOL_BOUNDARY.md).

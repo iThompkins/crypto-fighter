@@ -9,9 +9,10 @@ Returning after time away? Start with the concise
 [invariants](docs/INVARIANTS.md), [roadmap](docs/ROADMAP.md), and
 [decision log](docs/DECISIONS.md) to distinguish current facts from open policy.
 For contract/API names, the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md)
-is authoritative. The prospective CFC supply, ranked streak, reward-reserve,
-treasury, and owner-to-DAO rules are specified separately in the
-[CFC monetary policy](docs/CFC_MONETARY_POLICY.md); none is implemented yet.
+is authoritative. The CFC supply, ranked streak, reward-reserve, treasury, and
+owner-to-DAO rules are specified separately in the
+[CFC monetary policy](docs/CFC_MONETARY_POLICY.md). The token and segregated CFC
+vault exist locally; arena integration and ranked rewards do not.
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
@@ -273,7 +274,10 @@ protocol's authoritative context. The older optimistic result and gameplay-timeo
 payout functions were removed in Issue #9 because their evidence could not
 justify moving funds. See the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md).
 
-Only the chain's native token is accepted through payable calls. **ERC-20 and stablecoin support is not implemented.** There is no token address, allowance, transferFrom, oracle, or stable-value mechanism.
+The current arena still accepts only the chain's native token through payable
+calls. `CryptoFighterCoin` and its segregated vault are implemented but are not
+wired into challenge/join/settlement. **Stablecoin arena support is not
+implemented.** There is no oracle, redemption, or stable-value mechanism.
 
 ### Challenge and join
 
@@ -371,7 +375,8 @@ replay fallback is planned.
 - Input delay permits limited lookahead; commit-reveal is only proposed.
 - Session delegation now requires distinct session addresses.
 - UI covers only part of lifecycle and does not monitor deadlines.
-- ERC-20/stablecoins, fees, upgrades, emergency recovery, and production operations are absent.
+- CFC and its local accounting vault exist, but arena integration, stablecoins,
+  fees, upgrades, emergency recovery, and production operations are absent.
 
 ## Historical staged roadmap
 
@@ -383,7 +388,8 @@ This sequence records the original implementation direction. The concise
 3. **Build proof primitives:** canonical state, trace leaves, Merkle proofs, bisection, and one-step verifier are implemented; availability enforcement remains.
 4. **Replace timeout scaffolding:** authenticated relationships and adversarial deadline/stall/non-response tests.
 5. **Harden escrow:** threat model, fuzz/invariant testing, audit, domain/signature hardening, complete UI, monitoring/recovery.
-6. **Only then consider other assets:** ERC-20/stablecoins require explicit accounting, safe transfers, denomination policy, and separate review.
+6. **Only then consider other assets:** CFC accounting is implemented locally;
+   arena integration and stablecoins still require separate review.
 
 ## White-paper outline
 
@@ -486,8 +492,11 @@ used a different protocol and must not be treated as contract validation. Use
 
 ~~~text
 contracts/CryptoFighterArena.sol  shared arena admission and trace context
+contracts/CryptoFighterCoin.sol   owner-issued 18-decimal CFC ERC-20
+contracts/CryptoFighterVault.sol  segregated CFC rewards/escrow/credits/treasury
 contracts/GameTransitionVerifier.sol independent canonical one-step rules
 contracts/TraceDispute.sol        root claim, bisection, neutral adjudication
+hh/test/cfc-vault.cjs             CFC authority and accounting-isolation tests
 hh/test/match-lifecycle.cjs       challenge/join/cancel lifecycle tests
 hh/test/step-adjudication.cjs     Phase C-to-Solidity adversarial tests
 test/browser/gameplay.spec.mjs   local browser gameplay/replay checks

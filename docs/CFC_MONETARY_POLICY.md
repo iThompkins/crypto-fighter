@@ -1,9 +1,11 @@
 # CFC monetary policy and ranked Fibonacci rewards
 
-This document specifies the product and accounting policy required by Issue
-#12. It is not implemented. CFC does not exist in the repository yet, current
-escrow accepts only valueless local gas coin, and no current trace result can
-pay a reward.
+This document specifies the product and accounting policy approved in Issue
+#12. `CryptoFighterCoin` and the segregated CFC vault implement the issuance,
+reserve, escrow, credit, treasury, withdrawal, and owner-handoff primitives.
+They remain local-only and are not connected to the current arena. Ranked
+eligibility, stablecoin escrow, and result-driven settlement remain future work;
+no current trace result can pay a reward.
 
 ## Launch policy in plain language
 
