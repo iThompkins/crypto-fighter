@@ -21,8 +21,8 @@ trace verdicts still move no funds, and deployment remains local-only.
   whether the player was malicious, offline, or unable to retrieve evidence.
 - An accepted winner receives their own ante back plus the CFC reward reserved
   in the match terms. The loser's ante becomes settled treasury funds.
-- An accepted draw returns each player's own ante and releases the unused reward
-  reservation back to the reward vault.
+- An accepted draw sends both antes to settled treasury, releases the unused
+  reward reservation back to the reward vault, and names no winner.
 - If neither player establishes a usable result, both antes become settled
   treasury funds and the reward reservation is released.
 - Expired transitions are permissionless: anyone may execute the already-defined
@@ -107,7 +107,7 @@ the winner even if the other participant happened to be claimant.
 | --- | --- | --- | --- | --- |
 | Player 1 wins | Player 1 credit: own ante | No player credit | Credit to Player 1 | Player 2 ante |
 | Player 2 wins | No player credit | Player 2 credit: own ante | Credit to Player 2 | Player 1 ante |
-| Draw | Player 1 credit: own ante | Player 2 credit: own ante | Release to reward vault | Nothing |
+| Draw | No player credit | No player credit | Release to reward vault | Both antes |
 | No established result | No player credit | No player credit | Release to reward vault | Both antes |
 
 Streak advancement/reset is deliberately not hidden in this table. Issue #12
