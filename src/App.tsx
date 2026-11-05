@@ -16,7 +16,7 @@ import { buildEvidenceBundle } from "./evidence-trace";
 import { prepareAdjudicationWitness, prepareMidpointOpening, prepareTraceClaim, type AdjudicationComparison } from "./onchain-dispute";
 import { hello, verifyHello } from "./live-discovery";
 import { createGenesisSession, hashGenesisBinding, verifyGenesisConsent, readGenesisRecord, type GenesisAuthorization, type GenesisRecord } from "./genesis";
-import { rankedPreviewText, readRankedPreview } from "./ranked";
+import { createFundedOffer, joinFundedOffer, readFundedJoinPlan, readFundedOfferPlan, type FundedOfferPlan } from "./funded-match";
 import type { CanonicalFrame, GameState, MatchTranscript, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
 // Keys the game consumes; preventDefault so arrows/space don't scroll the page.
@@ -66,13 +66,17 @@ export default function App() {
   const [devMode, setDevMode] = useState(false);
   const [arenaScale, setArenaScale] = useState(1);
 
-  // Main-wallet access is read-only evidence admission; this client sends no transactions.
+  // The main wallet funds offers and admits an activated match; gameplay stays on session keys.
   const [mainWalletAddress, setMainWalletAddress] = useState("");
   const [chainLabel, setChainLabel] = useState("");
   const [arenaAddress, setArenaAddress] = useState("");
   const [onchainChallengeId, setOnchainChallengeId] = useState("");
   const [rankedOpponent, setRankedOpponent] = useState("");
-  const [rankedPreview, setRankedPreview] = useState("");
+  const [fundedAnteToken, setFundedAnteToken] = useState("");
+  const [fundedRanked, setFundedRanked] = useState(false);
+  const [fundedPlan, setFundedPlan] = useState<{ kind: "create" | "join"; value: FundedOfferPlan } | null>(null);
+  const [fundedStatus, setFundedStatus] = useState("");
+  const [fundedSubmitting, setFundedSubmitting] = useState(false);
   const mainSignerRef = useRef<Signer | null>(null);
 
   const matchIdRef = useRef(matchId);
@@ -97,6 +101,8 @@ export default function App() {
   const frameHeadRef = useRef(ZERO32);
   const genesisSessionRef = useRef<ReturnType<typeof createGenesisSession> | null>(null);
   const escrowRef = useRef<{ config: LiveConfig; record: GenesisRecord } | null>(null);
+  const pendingFundedRef = useRef<{ challengeId: string; role: "creator" | "joiner" } | null>(null);
+  const fundedSubmissionRef = useRef(false);
   const [authorizationInput, setAuthorizationInput] = useState("");
   const [disputeBundleInput, setDisputeBundleInput] = useState("");
   const [disputeComparisonInput, setDisputeComparisonInput] = useState("");
@@ -483,6 +489,14 @@ export default function App() {
   }
 
   async function resetLocal() {
+    if (fundedSubmissionRef.current) {
+      setLastError("Wait for the funded wallet action to finish before resetting this session key.");
+      return;
+    }
+    if (pendingFundedRef.current && !escrowRef.current) {
+      setLastError(`Session key is committed to funded challenge ${pendingFundedRef.current.challengeId}; activate it before resetting.`);
+      return;
+    }
     const generation = ++generationRef.current;
     preparationRef.current = null;
     liveRef.current?.close(); liveRef.current = null; escrowRef.current = null; genesisSessionRef.current = null;
@@ -494,6 +508,7 @@ export default function App() {
     stateRef.current = initialState(); setState(stateRef.current);
     setPackets([]); setCanonicalFrames([]); setFinalFrameHash(ZERO32); setFinalStateHash("");
     setRemoteWalletAddress(""); updateRemoteWalletPubKey(""); setLastError(""); setLiveStatus("practice discovery");
+    setFundedPlan(null); setFundedStatus("");
     setSavedContexts(await evidenceStore().contexts());
   }
 
@@ -504,6 +519,8 @@ export default function App() {
     try {
       if (preparationRef.current) throw new Error("Match preparation already in progress");
       preparationRef.current = preparation;
+      if (fundedSubmissionRef.current) throw new Error("A funded wallet action is still pending for this session key.");
+      if (pendingFundedRef.current && !escrowRef.current) throw new Error("This key is committed to a funded offer; load its activation before play.");
       if (genesisSessionRef.current && !escrowRef.current) throw new Error("This key adopted an escrow binding; load its activation or reset locally.");
       const config: LiveConfig = escrowRef.current?.config ?? { version: 1, mode: "practice", matchId: matchIdRef.current, rulesHash: CANONICAL_RULES_HASH, p1PublicKey: key.publicKey, p2PublicKey: remoteWalletPubKeyRef.current };
       let live = liveRef.current;
@@ -567,7 +584,8 @@ export default function App() {
         p1PublicKey: localSlotRef.current === 1 ? key.publicKey : remoteWalletPubKeyRef.current,
         p2PublicKey: localSlotRef.current === 2 ? key.publicKey : remoteWalletPubKeyRef.current, authorization };
       configHash(config);
-      escrowRef.current = { config, record }; updateMatchId(config.matchId); setLiveStatus("escrow authorized; ready to start");
+      escrowRef.current = { config, record }; pendingFundedRef.current = null;
+      updateMatchId(config.matchId); setLiveStatus("escrow authorized; ready to start");
     } catch (error) { if (generation === generationRef.current) setLastError(String(error)); }
     finally { if (preparationRef.current === preparation) preparationRef.current = null; }
   }
@@ -600,18 +618,81 @@ export default function App() {
     }
   }
 
-  async function previewRankedOffer() {
+  function fundedPlanText(plan: FundedOfferPlan): string {
+    const kind = plan.ranked ? "Ranked CFC" : "Unranked";
+    const restriction = plan.restrictedOpponent === "0x0000000000000000000000000000000000000000"
+      ? "open opponent" : `opponent ${short(plan.restrictedOpponent, 14)}`;
+    const ranked = plan.rankedPreview
+      ? `; streak ${plan.rankedPreview.startingStreak}; policy v${plan.rankedPreview.policyVersion}` : "";
+    return `${kind}: ${plan.anteDisplay} token units at risk from ${short(plan.anteToken, 14)}; ${plan.rewardCfc} CFC win reward; ${restriction}${ranked}; ${plan.allowanceRequired ? "exact allowance confirmation required" : "existing allowance sufficient"}.`;
+  }
+
+  async function previewFundedCreate() {
     try {
-      const signer = mainSignerRef.current;
-      if (!signer?.provider) throw new Error("Connect the main wallet first");
-      const preview = await readRankedPreview(
-        signer.provider,
-        arenaAddress.trim(),
-        await signer.getAddress(),
-        rankedOpponent.trim(),
+      setLastError("");
+      const signer = mainSignerRef.current, key = walletRef.current;
+      if (!signer?.provider || !key) throw new Error("Connect the main wallet first");
+      if (fundedSubmissionRef.current) throw new Error("A funded wallet action is already pending");
+      if (pendingFundedRef.current || liveRef.current || escrowRef.current) throw new Error("Current session key is already in use");
+      const plan = await readFundedOfferPlan(
+        signer.provider, arenaAddress.trim(), await signer.getAddress(), rankedOpponent.trim(),
+        fundedAnteToken.trim() || undefined, fundedRanked,
       );
-      setRankedPreview(rankedPreviewText(preview));
+      setFundedPlan({ kind: "create", value: plan }); setFundedStatus(fundedPlanText(plan));
     } catch (error) { setLastError(String(error)); }
+  }
+
+  async function submitFundedCreate() {
+    let ownsSubmission = false;
+    try {
+      setLastError("");
+      const signer = mainSignerRef.current, key = walletRef.current;
+      if (!signer?.provider || !key || fundedPlan?.kind !== "create") throw new Error("Preview current offer terms first");
+      if (fundedSubmissionRef.current) throw new Error("A funded wallet action is already pending");
+      if (pendingFundedRef.current || liveRef.current || escrowRef.current) throw new Error("Current session key is already in use");
+      fundedSubmissionRef.current = true; ownsSubmission = true; setFundedSubmitting(true);
+      setFundedStatus("Waiting for exact token approval and challenge confirmations...");
+      const result = await createFundedOffer(signer, {
+        arena: arenaAddress.trim(), matchId: matchIdRef.current, sessionKey: key.address,
+        opponent: rankedOpponent.trim(), anteToken: fundedAnteToken.trim() || undefined, ranked: fundedRanked,
+      });
+      pendingFundedRef.current = { challengeId: result.challengeId, role: "creator" };
+      setOnchainChallengeId(result.challengeId); setFundedPlan(null);
+      setFundedStatus(`Created challenge ${result.challengeId}; status open; confirmed transaction ${short(result.transactionHash, 18)}. This session key is now escrow-only.`);
+    } catch (error) { setLastError(String(error)); setFundedStatus("Funded offer was not created."); }
+    finally { if (ownsSubmission) { fundedSubmissionRef.current = false; setFundedSubmitting(false); } }
+  }
+
+  async function previewFundedJoin() {
+    try {
+      setLastError("");
+      const signer = mainSignerRef.current, key = walletRef.current;
+      if (!signer?.provider || !key) throw new Error("Connect the main wallet first");
+      if (fundedSubmissionRef.current) throw new Error("A funded wallet action is already pending");
+      if (pendingFundedRef.current || liveRef.current || escrowRef.current) throw new Error("Current session key is already in use");
+      const plan = await readFundedJoinPlan(signer.provider, arenaAddress.trim(), onchainChallengeId.trim(), await signer.getAddress());
+      setFundedPlan({ kind: "join", value: plan }); setFundedStatus(fundedPlanText(plan));
+    } catch (error) { setLastError(String(error)); }
+  }
+
+  async function submitFundedJoin() {
+    let ownsSubmission = false;
+    try {
+      setLastError("");
+      const signer = mainSignerRef.current, key = walletRef.current;
+      if (!signer?.provider || !key || fundedPlan?.kind !== "join") throw new Error("Preview current join terms first");
+      if (fundedSubmissionRef.current) throw new Error("A funded wallet action is already pending");
+      if (pendingFundedRef.current || liveRef.current || escrowRef.current) throw new Error("Current session key is already in use");
+      fundedSubmissionRef.current = true; ownsSubmission = true; setFundedSubmitting(true);
+      setFundedStatus("Waiting for exact token approval and join confirmations...");
+      const result = await joinFundedOffer(signer, {
+        arena: arenaAddress.trim(), challengeId: onchainChallengeId.trim(), sessionKey: key.address,
+      });
+      pendingFundedRef.current = { challengeId: result.challengeId, role: "joiner" };
+      setFundedPlan(null);
+      setFundedStatus(`Joined challenge ${result.challengeId}; status active; confirmed transaction ${short(result.transactionHash, 18)}. This session key is now escrow-only.`);
+    } catch (error) { setLastError(String(error)); setFundedStatus("Funded offer was not joined."); }
+    finally { if (ownsSubmission) { fundedSubmissionRef.current = false; setFundedSubmitting(false); } }
   }
 
   async function copy(text: string) {
@@ -1040,7 +1121,7 @@ export default function App() {
           <section style={styles.panel}>
             <h2 style={styles.h2}>Escrow evidence</h2>
             <div style={styles.sub}>
-              Practice games never touch a contract. For an escrow game, connect the main wallet only to load and verify an already activated local-chain match. This client sends no transactions. Session address:{" "}
+              Practice games never touch a contract. On local chain, the main wallet can fund an offer while this disposable session address is bound to gameplay:{" "}
               {short(wallet?.address ?? "", 18) || "generating..."}
             </div>
             <div style={styles.row}>
@@ -1054,29 +1135,53 @@ export default function App() {
             <div style={styles.row}>
               <input
                 style={styles.input}
+                disabled={fundedSubmitting}
                 value={arenaAddress}
-                onChange={(e) => setArenaAddress(e.target.value)}
+                onChange={(e) => { setArenaAddress(e.target.value); setFundedPlan(null); }}
                 placeholder="Arena contract address (0x...)"
               />
             </div>
             <div style={styles.row}>
               <input
                 style={styles.input}
+                disabled={fundedSubmitting}
                 value={rankedOpponent}
-                onChange={(event) => setRankedOpponent(event.target.value)}
-                placeholder="Ranked opponent wallet (0x...)"
+                onChange={(event) => { setRankedOpponent(event.target.value); setFundedPlan(null); }}
+                placeholder="Opponent wallet (required for ranked)"
               />
-              <button style={styles.smallButton} onClick={() => void previewRankedOffer()}>Preview ranked terms</button>
+              <input
+                style={styles.input}
+                disabled={fundedSubmitting}
+                value={fundedAnteToken}
+                onChange={(event) => { setFundedAnteToken(event.target.value); setFundedPlan(null); }}
+                placeholder="Ante token (blank uses CFC)"
+              />
             </div>
-            <div style={styles.sub}>{rankedPreview || "Ranked preview is read-only and sends no transaction."}</div>
+            <label style={styles.row}>
+              <input
+                type="checkbox"
+                disabled={fundedSubmitting}
+                checked={fundedRanked}
+                onChange={(event) => { setFundedRanked(event.target.checked); setFundedPlan(null); }}
+              />
+              Ranked offer (1 CFC ante; named equal-streak opponent)
+            </label>
+            <div style={styles.row}>
+              <button style={styles.smallButton} disabled={fundedSubmitting} onClick={() => void previewFundedCreate()}>Preview create terms</button>
+              <button style={styles.smallButton} disabled={fundedSubmitting || fundedPlan?.kind !== "create"} onClick={() => void submitFundedCreate()}>Create funded offer</button>
+            </div>
             <div style={styles.row}>
               <input
                 style={styles.input}
+                disabled={fundedSubmitting}
                 value={onchainChallengeId}
-                onChange={(e) => setOnchainChallengeId(e.target.value)}
+                onChange={(e) => { setOnchainChallengeId(e.target.value); setFundedPlan(null); }}
                 placeholder="Challenge id"
               />
+              <button style={styles.smallButton} disabled={fundedSubmitting} onClick={() => void previewFundedJoin()}>Preview join terms</button>
+              <button style={styles.smallButton} disabled={fundedSubmitting || fundedPlan?.kind !== "join"} onClick={() => void submitFundedJoin()}>Join funded offer</button>
             </div>
+            <div style={styles.sub}>{fundedStatus || "Preview exact ante, reward, opponent restriction, and approval before your wallet is asked to confirm."}</div>
             <textarea aria-label="Genesis authorization" placeholder="Activated genesis authorization JSON" value={authorizationInput} onChange={event => setAuthorizationInput(event.target.value)} />
             <button style={styles.smallButton} onClick={() => void exportGenesisConsent()}>Export genesis consent</button>
             <button style={styles.smallButton} onClick={() => void loadEscrow()}>Load activated escrow match</button>
