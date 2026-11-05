@@ -9,7 +9,9 @@ Returning after time away? Start with the concise
 [invariants](docs/INVARIANTS.md), [roadmap](docs/ROADMAP.md), and
 [decision log](docs/DECISIONS.md) to distinguish current facts from open policy.
 For contract/API names, the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md)
-is authoritative.
+is authoritative. The prospective CFC supply, ranked streak, reward-reserve,
+treasury, and owner-to-DAO rules are specified separately in the
+[CFC monetary policy](docs/CFC_MONETARY_POLICY.md); none is implemented yet.
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
