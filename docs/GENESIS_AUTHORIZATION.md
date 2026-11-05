@@ -25,23 +25,22 @@ arena and client entry points are current, removed, or unresolved.
 
 1. `challenge` permanently reserves `challengeForGenesis[genesis]` for the new
    challenge. Zero/reused IDs are rejected. Cancellation does not free the ID.
-2. `join` records a distinct P2 wallet and distinct nonzero session key, verifies
-   equal stake/opponent restriction, and freezes a `GenesisBinding` snapshot.
-   The original `Challenge.stake` may later become zero, but this snapshot never
-   changes. `join` replaces the provisional `matchContextHash` with the completed
+2. `join` records a distinct P2 wallet and distinct nonzero session key, collects
+   the snapshotted ante, checks the opponent restriction, and freezes a
+   `GenesisBinding` snapshot. `join` replaces the provisional `matchContextHash` with the completed
    binding hash. Before join, the provisional value cannot be authorized.
 3. Each session signs its slot-specific authorization digest over the completed
    binding hash. `authorizeGenesis` can be relayed by anyone with both signatures;
    only the two delegated keys can produce the accepted signatures. Activation
    is atomic, one-time and requires a still-active challenge before or at the
    authorization deadline (`joinedAt + responseWindow`).
-4. Current trace entry points require activation and end in a neutral verdict
-   with no fund effect.
+4. Current trace entry points require activation. Unchallenged or surviving
+   traces settle their terminal outcome; invalid competing traces can produce
+   no result.
 5. If activation never completes, anyone may call `refundUnactivatedMatch` strictly
    after the deadline. It cancels once and returns each deposit to its owner,
    rather than declaring a gameplay loser. An activated match cannot use this
-   refund. Effects precede guarded transfers; recipient contracts that refuse
-   transfers remain a known push-payment recovery limitation.
+   refund. Refunds become player-owned pull credits in the appropriate vault.
 
 Authorization changes `genesisAuthorized`; it does not rewrite the completed
 binding hash. The exact provisional/completed/authorized states and permitted
@@ -73,16 +72,18 @@ remain review items before funds are enabled.
 | rulesHash | bytes32 |
 | p1, p2 | address, address |
 | p1Session, p2Session | address, address |
+| anteToken | address |
 | stake | uint256 |
+| rewardAmount | uint256 |
 | responseWindow | uint256 |
 | restrictedOpponent | address |
 
 There is one canonical rules fingerprint, not match-specific gameplay options.
-Stake is the original per-player native-token deposit; the token/payment semantics
-are fixed by this arena version. Escrow response deadlines do not change gameplay.
+`stake` is the snapshotted per-player amount of `anteToken`; `rewardAmount` is
+the reserved CFC promise. Escrow response deadlines do not change gameplay.
 
 ```
-bindingTag = keccak256(UTF8("CryptoFighter.GenesisBinding.v1"))
+bindingTag = keccak256(UTF8("CryptoFighter.GenesisBinding.v2"))
 bindingHash = keccak256(abi.encode(bindingTag, binding))
 authorizationTag = keccak256(UTF8("CryptoFighter.GenesisAuthorization.v1"))
 authorizationDigest = keccak256(abi.encode(authorizationTag, bindingHash, uint256 slot))
@@ -120,7 +121,8 @@ pipeline. This signer does not infer network receipt from a caller-supplied hash
 The browser now integrates this authorization boundary with authenticated live
 play and durable public evidence; see [Phase B](PHASE_B.md). Its escrow path requires
 a local provider lookup and both authorization signatures before readiness.
-No session private keys are persisted or recovered, and settlement remains disabled.
+No session private keys are persisted or recovered, and the browser does not
+submit settlement transactions.
 
 ## Authorized trace commitments
 

@@ -180,11 +180,9 @@ simultaneous-hit processing, or tie policy were introduced.
 
 ## Phase boundary
 
-This phase migrates the state codec in existing contracts and updates versioned
-trace consumers solely for consistency. It does not add transitions, dispute
-resolution, replacement claims, timeouts, recovery, or payout authority. Existing
-trace claims still have no payout/recovery path; all settlement containment stays
-in place. Phase B and later work remains as laid out in the approved roadmap.
+This phase migrated the state codec and did not itself add settlement. Later
+work now supplies dispute correction, timeouts, recovery, and local vault-accounting
+effects without changing the fixed-point gameplay rules described here.
 
 ## Exit validation
 

@@ -5,6 +5,7 @@ const { execFileSync } = require('node:child_process');
 const { mkdtempSync, readFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { ethers } = require('hardhat');
+const { CFC, deployArena } = require('./helpers/arena-fixture.cjs');
 
 const abi = ethers.AbiCoder.defaultAbiCoder();
 const tag = s => ethers.id(`CryptoFighter:fixed-point-trace-v2:${s}`);
@@ -65,9 +66,9 @@ async function fixture() {
   const [p1,p2,relayer,outsider] = await ethers.getSigners();
   const s1 = new ethers.Wallet('0x' + '1'.padStart(64,'0'));
   const s2 = new ethers.Wallet('0x' + '2'.padStart(64,'0'));
-  const arena = await (await ethers.getContractFactory('CryptoFighterArena')).deploy();
-  await arena.connect(p1).challenge(transcript.matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, 86400, {value:1});
-  const joined = await (await arena.connect(p2).join(1, s2.address, {value:1})).wait();
+  const {arena,coin,vault}=await deployArena([p1,p2]);
+  await arena.connect(p1).challenge(transcript.matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress());
+  const joined = await (await arena.connect(p2).join(1, s2.address)).wait();
   const locator = {chainId:'31337', arena:await arena.getAddress(), challengeId:'1'};
   let record = await modules.genesis.readGenesisRecord(ethers.provider, locator, joined.blockNumber);
   const authorization = { binding:record.binding,
@@ -86,13 +87,13 @@ async function fixture() {
   const bundle=await modules.evidence.buildEvidenceBundle(archive,record);
   const defense=await modules.evidence.loadEvidenceDefense(bundle,record);
   const correct=tree(bundle.trace.contextHash,bundle.trace.checkpoints.map(value=>({...value})));
-  return {arena,p1,p2,outsider,s1,s2,bundle,defense,correct};
+  return {arena,coin,vault,p1,p2,outsider,s1,s2,bundle,defense,correct};
 }
 
 async function isolate(m, claimant, challenger, frame) {
   const terminal=asState(m.bundle.reconstruction.states.at(-1));
   await m.arena.connect(m.p1).claimTrace(1,claimant.root,opening(claimant.open(0)),opening(claimant.open(300)),terminal);
-  await m.arena.connect(m.p2).challengeTrace(1,challenger.root,opening(challenger.open(0)),opening(challenger.open(300)));
+  await m.arena.connect(m.p2).challengeTrace(1,challenger.root,opening(challenger.open(0)),opening(challenger.open(300)),terminal);
   let game=await m.arena.getTraceGame(1);
   while(game.phase === 2n) {
     const mid=Number((game.low+game.high)/2n);
@@ -117,9 +118,9 @@ describe('Solidity one-step execution adjudication', function () {
     await isolate(m,m.correct,bad,frame);
     await m.arena.connect(m.p1).adjudicateStep(...witness(m,m.correct,bad,frame));
     const game=await m.arena.getTraceGame(1);
-    assert.equal(game.phase,4n); assert.equal(game.verdict,1n);
+    assert.equal(game.phase,1n); assert.equal(game.verdict,1n);
     assert.equal(game.canonicalPost,cpHash(m.correct.checkpoints[frame]));
-    assert.equal(await ethers.provider.getBalance(await m.arena.getAddress()),2n);
+    assert.equal(await m.vault.totalActiveEscrow(),2n*CFC);
   });
 
   it('selects a correct challenger and can determine that neither execution claim is valid', async function () {
@@ -189,7 +190,7 @@ describe('Solidity one-step execution adjudication', function () {
     assert.equal(await m.arena.provenEvidenceFaults(equivocation),true);
     await reject(m.arena.proveEquivocation(1,a,a),'duplicate packet');
     await reject(m.arena.proveEquivocation(1,a,{...b,matchId:ethers.id('wrong')}),'wrong match');
-    assert.equal(await ethers.provider.getBalance(await m.arena.getAddress()),2n);
+    assert.equal(await m.vault.totalActiveEscrow(),2n*CFC);
     assert.equal((await m.arena.getChallenge(1)).status,2n);
   });
 
@@ -200,6 +201,6 @@ describe('Solidity one-step execution adjudication', function () {
     assert.equal(await m.arena.traceArchiveHashes(1,m.p1.address,root),journal);
     await m.arena.connect(m.p1).publishTraceArchive(1,root,journal);
     await reject(m.arena.connect(m.p1).publishTraceArchive(1,root,ethers.id('different-journal')),'archive commitment conflict');
-    assert.equal(await ethers.provider.getBalance(await m.arena.getAddress()),2n);
+    assert.equal(await m.vault.totalActiveEscrow(),2n*CFC);
   });
 });

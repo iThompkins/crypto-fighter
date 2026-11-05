@@ -7,14 +7,14 @@ import type { PlayerSlot, SessionWallet, SignedInputPacket } from "./types.ts";
 
 export type GenesisBinding = {
   chainId: string; arena: string; challengeId: string; genesis: string; rulesHash: string;
-  p1: string; p2: string; p1Session: string; p2Session: string; stake: string;
-  responseWindow: string; restrictedOpponent: string;
+  p1: string; p2: string; p1Session: string; p2Session: string; anteToken: string;
+  stake: string; rewardAmount: string; responseWindow: string; restrictedOpponent: string;
 };
 export type GenesisRecord = { binding: GenesisBinding; authorized: boolean; registrationChallengeId: string; lookup?: { chainId: string; arena: string; challengeId: string; blockNumber: number } };
 export type GenesisAuthorization = { binding: GenesisBinding; p1Signature: string; p2Signature: string };
-export const GENESIS_BINDING_TAG = id("CryptoFighter.GenesisBinding.v1");
+export const GENESIS_BINDING_TAG = id("CryptoFighter.GenesisBinding.v2");
 export const GENESIS_AUTHORIZATION_TAG = id("CryptoFighter.GenesisAuthorization.v1");
-export const GENESIS_BINDING_TUPLE = "tuple(uint256 chainId,address arena,uint256 challengeId,bytes32 genesis,bytes32 rulesHash,address p1,address p2,address p1Session,address p2Session,uint256 stake,uint256 responseWindow,address restrictedOpponent)";
+export const GENESIS_BINDING_TUPLE = "tuple(uint256 chainId,address arena,uint256 challengeId,bytes32 genesis,bytes32 rulesHash,address p1,address p2,address p1Session,address p2Session,address anteToken,uint256 stake,uint256 rewardAmount,uint256 responseWindow,address restrictedOpponent)";
 export const GENESIS_ABI = [
   `function getGenesisBinding(uint256 challengeId) view returns (${GENESIS_BINDING_TUPLE} binding,bool authorized)`,
   "function challengeForGenesis(bytes32 genesis) view returns (uint256)",
@@ -32,12 +32,12 @@ function unsigned(value: string): bigint {
 }
 
 export function hashGenesisBinding(binding: GenesisBinding): string {
-  if (unsigned(binding.chainId) === 0n || unsigned(binding.challengeId) === 0n || unsigned(binding.stake) === 0n) throw new Error("positive chain, challenge and stake required");
+  if (unsigned(binding.chainId) === 0n || unsigned(binding.challengeId) === 0n || unsigned(binding.stake) === 0n || unsigned(binding.rewardAmount) === 0n) throw new Error("positive chain, challenge, stake and reward required");
   const window = unsigned(binding.responseWindow);
   if (window < 86400n || window >= 1n << 64n) throw new Error("invalid response window");
   if (!bytes32(binding.genesis) || /^0x0{64}$/.test(binding.genesis)) throw new Error("invalid genesis");
   if (binding.rulesHash !== CANONICAL_RULES_HASH) throw new Error("unsupported canonical rules");
-  for (const field of ["arena", "p1", "p2", "p1Session", "p2Session"] as const) {
+  for (const field of ["arena", "p1", "p2", "p1Session", "p2Session", "anteToken"] as const) {
     if (getAddress(binding[field]) === ZERO_ADDRESS) throw new Error("nonzero binding addresses required");
   }
   if (getAddress(binding.p1) === getAddress(binding.p2) || getAddress(binding.p1Session) === getAddress(binding.p2Session)) throw new Error("distinct participants and session keys required");
@@ -79,7 +79,8 @@ export async function readGenesisRecord(provider: Provider, locator: { chainId: 
   const binding: GenesisBinding = {
     chainId: b.chainId.toString(), arena: b.arena, challengeId: b.challengeId.toString(), genesis: b.genesis,
     rulesHash: b.rulesHash, p1: b.p1, p2: b.p2, p1Session: b.p1Session, p2Session: b.p2Session,
-    stake: b.stake.toString(), responseWindow: b.responseWindow.toString(), restrictedOpponent: b.restrictedOpponent,
+    anteToken: b.anteToken, stake: b.stake.toString(), rewardAmount: b.rewardAmount.toString(),
+    responseWindow: b.responseWindow.toString(), restrictedOpponent: b.restrictedOpponent,
   };
   hashGenesisBinding(binding);
   if (binding.chainId !== locator.chainId || binding.challengeId !== locator.challengeId || getAddress(binding.arena) !== getAddress(locator.arena)) throw new Error("unexpected genesis record domain");

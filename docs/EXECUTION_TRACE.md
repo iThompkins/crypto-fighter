@@ -30,11 +30,11 @@ context-authorized trace construction, an off-chain authenticated bisection
 coordinator, and compact Solidity Merkle membership verification are now
 implemented. See [GENESIS_AUTHORIZATION.md](GENESIS_AUTHORIZATION.md) for exact
 formats, chain authority, lifecycle and tested limits. On-chain trace claims,
-bisection turns/deadlines, and neutral one-step adjudication are implemented below.
+bisection turns/deadlines, one-step adjudication, correction windows, and local
+vault settlement are implemented below.
 Phase A replaces the defective coordinate encoding with fixed-point v2.
-Authenticated non-response recovery and trace settlement remain unimplemented.
-The sections below describe the design and implementation boundaries; they do
-not claim a complete settlement protocol. The exact API classification is in
+Authenticated non-response recovery and trace settlement are now implemented;
+archive delivery enforcement and production operation are not. The exact API classification is in
 [PROTOCOL_BOUNDARY.md](PROTOCOL_BOUNDARY.md#entry-point-classification).
 
 ## Repository inspection and reuse
@@ -228,9 +228,9 @@ midpoint turns after at most nine rounds. Events and `getTraceGame` expose roots
 responders, bracket, round and deadline. The legacy settlement/timeout entries
 described by this dated milestone were removed in Issue #9.
 
-This stage intentionally locks local test deposits pending adjudication/recovery;
-it is not a usable escrow lifecycle. Trace claims never transfer funds. Browser
-contract transactions in the browser and real-money deployment remain disabled.
+This dated stage originally stopped at neutral adjudication. The current arena
+adds correction windows, permissionless timeout progression, and vault-accounting
+settlement. Browser contract transactions and real-money deployment remain disabled.
 
 ## Neutral one-step implementation — 2026-10-01
 

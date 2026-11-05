@@ -4,6 +4,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const solc = require('solc');
 const { ethers } = require('hardhat');
+const { deployArena } = require('./helpers/arena-fixture.cjs');
 const vectors = JSON.parse(fs.readFileSync(path.join(__dirname,'../../test/fixtures/fixed-point-v2.json'),'utf8'));
 const asState = s => ({frame:s.frame,timer:s.timerFramesLeft,terminal:s.roundOver,outcome:{P1:1,P2:2,TIE_BOTH_LOSE:3}[s.winner] ?? 0,p1:s.p1,p2:s.p2});
 const fromState = s => ({
@@ -19,7 +20,7 @@ before(async function () {
 
 describe('Phase A fixed-point codec and arithmetic parity (no adjudication)', function () {
   it('hashes independent state vectors exactly, including negative velocity and terminal states', async function () {
-    const arena=await (await ethers.getContractFactory('CryptoFighterArena')).deploy();
+    const {arena}=await deployArena();
     for(const v of vectors.states) assert.equal(await arena.hashTraceState(asState(v.after)),v.hash,v.name);
   });
   it('matches the specified nearest-even division with integer Solidity arithmetic', async function () {
