@@ -40,7 +40,7 @@ disabled. The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies the cur
 - Enforced evidence delivery/availability and recovery beyond local retention/integrity hashes.
 - Approved claim replacement, simultaneous dispute, both-invalid, and equivocation consequences.
 - Approved chain-finality/reorg trust assumptions for transaction-time record refresh.
-- Ranked streak and Fibonacci reward implementation.
+- Browser funding/settlement transaction flows and operational monitoring.
 - External security review before any relaxation of local-only/funding containment.
 
 ## Future policy decisions
@@ -81,6 +81,6 @@ disabled. The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies the cur
 
 ## Exact reason the project is not production-complete
 
-The local funded-state exits are implemented and tested. Ranked streaks,
-availability operations, client transaction flows, public-chain assumptions,
+The local funded-state exits and ranked streaks are implemented and tested.
+Availability operations, client transaction flows, public-chain assumptions,
 and external security review remain before production use.

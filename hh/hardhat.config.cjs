@@ -14,7 +14,8 @@ subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD).setAction(async ({ solcVersion }) 
 module.exports = {
   solidity: {
     version: "0.8.26",
-    settings: { viaIR: true, optimizer: { enabled: true, runs: 200 } },
+    // Favor deployable runtime size; arena methods are low-frequency settlement calls.
+    settings: { viaIR: true, optimizer: { enabled: true, runs: 1 } },
   },
   paths: {
     sources: path.join(__dirname, "contracts"),

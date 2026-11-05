@@ -58,7 +58,7 @@ async function setup(asset = "cfc", options = {}) {
   const s1 = ethers.Wallet.createRandom(), s2 = ethers.Wallet.createRandom();
   const matchId = ethers.hexlify(ethers.randomBytes(32));
   await ctx.arena.connect(p1).challenge(
-    matchId, await ctx.arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await anteToken.getAddress()
+    matchId, await ctx.arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await anteToken.getAddress(), false
   );
   if (options.disableBeforeJoin) {
     await ctx.tokenEscrow.configureAsset(await anteToken.getAddress(), 0, false);

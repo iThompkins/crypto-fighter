@@ -3,9 +3,8 @@
 This document specifies the product and accounting policy approved in Issue
 #12. `CryptoFighterCoin` and the segregated CFC vault implement the issuance,
 reserve, escrow, credit, treasury, withdrawal, and owner-handoff primitives.
-They remain local-only and are not connected to the current arena. Ranked
-eligibility, stablecoin escrow, and result-driven settlement remain future work;
-no current trace result can pay a reward.
+The local arena now connects those primitives to approved-token settlement and
+same-streak ranked Fibonacci rewards. Public-chain deployment remains future work.
 
 ## Launch policy in plain language
 

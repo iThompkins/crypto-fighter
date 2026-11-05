@@ -1,18 +1,16 @@
 # Roadmap
 
-Implemented now: local gameplay, durable evidence, trace comparison, and neutral
-one-step adjudication, plus the local-only CFC token and segregated CFC vault.
+Implemented now: local gameplay, durable evidence, trace adjudication, approved-token
+settlement, and same-streak CFC Fibonacci rewards with segregated vaults.
 
-Not implemented: arena/token integration, safe settlement, stablecoin escrow,
-or ranked streak execution.
+Not implemented: public-chain operations, browser transaction flows, DAO
+governance, archive delivery enforcement, or external security review.
 
 The current trace path, removed legacy surface, and unresolved work are
 classified in the [protocol-boundary guide](PROTOCOL_BOUNDARY.md).
 
-Future policy work is tracked in [Issue #5](https://github.com/iThompkins/crypto-fighter/issues/5)
-and [Issue #4](https://github.com/iThompkins/crypto-fighter/issues/4). Until that
-work is specified, implemented, tested, and reviewed, settlement stays disabled
-and deployment stays local-only.
+Deployment stays local-only until production assumptions are implemented,
+tested, reviewed, and externally audited.
 
 ## Evidence and chain trust
 

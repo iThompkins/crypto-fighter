@@ -27,8 +27,9 @@ arena and client entry points are current, removed, or unresolved.
    challenge. Zero/reused IDs are rejected. Cancellation does not free the ID.
 2. `join` records a distinct P2 wallet and distinct nonzero session key, collects
    the snapshotted ante, checks the opponent restriction, and freezes a
-   `GenesisBinding` snapshot. `join` replaces the provisional `matchContextHash` with the completed
-   binding hash. Before join, the provisional value cannot be authorized.
+   `GenesisBinding` snapshot. `join` replaces the open offer's zero
+   `matchContextHash` with the completed binding hash. Before join, no context
+   can be authorized.
 3. Each session signs its slot-specific authorization digest over the completed
    binding hash. `authorizeGenesis` can be relayed by anyone with both signatures;
    only the two delegated keys can produce the accepted signatures. Activation
@@ -43,7 +44,7 @@ arena and client entry points are current, removed, or unresolved.
    refund. Refunds become player-owned pull credits in the appropriate vault.
 
 Authorization changes `genesisAuthorized`; it does not rewrite the completed
-binding hash. The exact provisional/completed/authorized states and permitted
+binding hash. The exact open/completed/authorized states and permitted
 consumers are listed in the [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-lifecycle).
 
 Uniqueness is authoritative within the specified arena. Another arena/chain can

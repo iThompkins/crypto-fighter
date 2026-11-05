@@ -12,7 +12,7 @@ For contract/API names, the [current protocol boundary](docs/PROTOCOL_BOUNDARY.m
 is authoritative. The CFC supply, ranked streak, reward-reserve, treasury, and
 owner-to-DAO rules are specified separately in the
 [CFC monetary policy](docs/CFC_MONETARY_POLICY.md). The token, segregated vaults,
-and base match settlement exist locally; ranked streak rewards do not.
+base settlement, and same-streak Fibonacci-ranked matches exist locally.
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
 
@@ -286,9 +286,16 @@ and either CFC or an approved token. It snapshots the asset, ante, one-CFC base
 reward, opponent restriction, and fixed 24-hour response window, reserves the
 reward, and deposits P1's ante.
 
+With the ranked flag, the ante must be CFC and the opponent must be named. The
+ranked module requires equal current streaks, locks P1 to one unsettled ranked
+offer, calculates `F(streak + 1)`, and snapshots the reward and policy version.
+The read-only browser preview plainly reports the 1 CFC risk, both-wallet
+eligibility, streak, next-win reward, reserve sufficiency, and policy version
+before the user creates a transaction in an external wallet/tool.
+
 `join` requires Open status, a caller other than P1, the snapshotted ante, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key (requiring distinct keys), makes the escrow Active but
-not yet authorized for play, and freezes the full GenesisBinding. Its hash replaces
-the provisional matchContextHash. Both session authorizations must activate the
+not yet authorized for play, and freezes the full GenesisBinding. Its hash sets
+the previously zero matchContextHash. Both session authorizations must activate the
 genesis before current trace actions. Unactivated matches refund both deposits
 after the authorization deadline; their genesis reservations remain permanent.
 
@@ -377,7 +384,7 @@ replay fallback is planned.
 - Input delay permits limited lookahead; commit-reveal is only proposed.
 - Session delegation now requires distinct session addresses.
 - UI covers only part of lifecycle and does not monitor deadlines.
-- CFC and approved-token vaults are integrated locally, but ranked streaks,
+- CFC, approved-token vaults, and ranked streaks are integrated locally, but
   fees, upgrades, emergency recovery, and production operations are absent.
 
 ## Historical staged roadmap
@@ -497,11 +504,13 @@ contracts/CryptoFighterArena.sol  shared arena admission and trace context
 contracts/CryptoFighterCoin.sol   owner-issued 18-decimal CFC ERC-20
 contracts/CryptoFighterVault.sol  segregated CFC rewards/escrow/credits/treasury
 contracts/CryptoFighterTokenEscrow.sol approved ERC-20 escrow/credits/treasury
+contracts/CryptoFighterRanked.sol ranked streak/Fibonacci policy module
 contracts/GameTransitionVerifier.sol independent canonical one-step rules
 contracts/TraceDispute.sol        root claim, bisection, correction, finalization
 hh/test/cfc-vault.cjs             CFC authority and accounting-isolation tests
 hh/test/match-lifecycle.cjs       challenge/join/cancel lifecycle tests
 hh/test/settlement.cjs            token exits, deadlines, and payout accounting
+hh/test/ranked-streaks.cjs         ranked eligibility and streak economics
 hh/test/step-adjudication.cjs     Phase C-to-Solidity adversarial tests
 test/browser/gameplay.spec.mjs   local browser gameplay/replay checks
 tools/verify-match.mjs            CLI adapter for shared transcript verifier

@@ -19,12 +19,16 @@ async function main() {
   const TokenEscrow = await ethers.getContractFactory("CryptoFighterTokenEscrow");
   const tokenEscrow = await TokenEscrow.deploy(deployer.address, deployer.address);
   await tokenEscrow.waitForDeployment();
+  const Ranked = await ethers.getContractFactory("CryptoFighterRanked");
+  const ranked = await Ranked.deploy(deployer.address, deployer.address);
+  await ranked.waitForDeployment();
   const Arena = await ethers.getContractFactory("CryptoFighterArena");
-  const arena = await Arena.deploy(await vault.getAddress(), await tokenEscrow.getAddress(), deployer.address);
+  const arena = await Arena.deploy(await vault.getAddress(), await tokenEscrow.getAddress(), await ranked.getAddress());
   await arena.waitForDeployment();
   await vault.beginOperatorTransfer(await arena.getAddress());
   await tokenEscrow.beginOperatorTransfer(await arena.getAddress());
-  await arena.acceptVaultOperatorRoles();
+  await ranked.beginOperatorTransfer(await arena.getAddress());
+  await arena.acceptOperatorRoles();
   console.log("CFC_ADDRESS=" + await coin.getAddress());
   console.log("CFC_OWNER=" + await coin.owner());
   console.log("CFC_VAULT_ADDRESS=" + await vault.getAddress());
@@ -33,8 +37,10 @@ async function main() {
   console.log("TOKEN_ESCROW_ADDRESS=" + await tokenEscrow.getAddress());
   console.log("TOKEN_ESCROW_OWNER=" + await tokenEscrow.owner());
   console.log("TOKEN_ESCROW_OPERATOR=" + await tokenEscrow.operator());
+  console.log("RANKED_POLICY_ADDRESS=" + await ranked.getAddress());
+  console.log("RANKED_POLICY_OWNER=" + await ranked.owner());
+  console.log("RANKED_POLICY_OPERATOR=" + await ranked.operator());
   console.log("ARENA_ADDRESS=" + await arena.getAddress());
-  console.log("ARENA_OWNER=" + await arena.owner());
 }
 
 module.exports = { assertLocalDeployment };

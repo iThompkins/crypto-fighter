@@ -201,12 +201,14 @@ from economic consequences.
   reserved rewards, active CFC escrow, player credits, and settled treasury.
 - Local-only CFC/approved-token match funding with 24-hour game and dispute
   windows, permissionless timeout progression, and pull-based settlement.
+- Same-streak ranked CFC offers with exact 1 CFC antes, prefunded Fibonacci
+  rewards, single-active-match locks, and terminal streak updates.
 
 ## What is not built today
 
 - A production model for chain finality, reorganizations, or trusted RPC data.
-- Ranked streak execution, archive-availability enforcement, public-chain
-  deployment, real-money use, or reputation.
+- Archive-availability enforcement, public-chain deployment, real-money use,
+  DAO governance, or reputation.
 
 ## The current contract boundary
 
@@ -214,14 +216,14 @@ The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) is the authoritative API
 classification and explains how the Solidity source contracts compose into the
 arena deployment.
 
-`CryptoFighterArena.sol` now contains only the shared challenge/genesis lifecycle
-and current trace context. The older optimistic-result and gameplay-timeout
+`CryptoFighterArena.sol` coordinates challenge/genesis, trace settlement, vaults,
+and the separate ranked-policy module. The older optimistic-result and gameplay-timeout
 payout APIs, related state, and disabled browser handlers were removed in Issue
-#9. There are no compatibility stubs and no current result-to-funds function.
+#9. There are no compatibility stubs; the replacement state machine is intentionally incompatible.
 
-There is also a provisional `matchContextHash` when Alice first creates a
-challenge, because Bob is not known yet. When Bob joins, the contract replaces
-it with the completed `GenesisBinding` hash. Authorization changes a separate
+`matchContextHash` remains zero while an offer is open because Bob is not known
+yet. When Bob joins, the contract sets it to the completed `GenesisBinding`
+hash. Authorization changes a separate
 boolean; it does not change the completed hash again. Only the completed and
 independently verified authorized value can be used as the trace context. See
 the exact [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-lifecycle).

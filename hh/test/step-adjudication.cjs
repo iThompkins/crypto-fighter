@@ -67,7 +67,7 @@ async function fixture() {
   const s1 = new ethers.Wallet('0x' + '1'.padStart(64,'0'));
   const s2 = new ethers.Wallet('0x' + '2'.padStart(64,'0'));
   const {arena,coin,vault}=await deployArena([p1,p2]);
-  await arena.connect(p1).challenge(transcript.matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress());
+  await arena.connect(p1).challenge(transcript.matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress(), false);
   const joined = await (await arena.connect(p2).join(1, s2.address)).wait();
   const locator = {chainId:'31337', arena:await arena.getAddress(), challengeId:'1'};
   let record = await modules.genesis.readGenesisRecord(ethers.provider, locator, joined.blockNumber);

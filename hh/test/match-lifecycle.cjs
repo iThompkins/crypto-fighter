@@ -30,7 +30,8 @@ describe("CryptoFighterArena match lifecycle", function () {
       overrides.rules ?? rules,
       overrides.session ?? session.address,
       p2.address,
-      cfcAddress
+      cfcAddress,
+      false
     );
 
     await rejected(create({ matchId: ethers.ZeroHash }), "matchId required");
@@ -54,7 +55,7 @@ describe("CryptoFighterArena match lifecycle", function () {
     const s1 = ethers.Wallet.createRandom();
     const s2 = ethers.Wallet.createRandom();
     await arena.connect(p1).challenge(
-      ethers.id("restricted match"), await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress()
+      ethers.id("restricted match"), await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress(), false
     );
 
     await rejected(arena.connect(p1).join(1, s2.address), "cannot join self");
@@ -75,7 +76,7 @@ describe("CryptoFighterArena match lifecycle", function () {
     const { arena, coin, vault } = await deployArena([p1]);
     await arena.connect(p1).challenge(
       ethers.id("cancelled match"), await arena.CANONICAL_RULES_HASH(),
-      ethers.Wallet.createRandom().address, ethers.ZeroAddress, await coin.getAddress()
+      ethers.Wallet.createRandom().address, ethers.ZeroAddress, await coin.getAddress(), false
     );
     await rejected(arena.connect(other).cancelOpenChallenge(1), "only challenger");
     await arena.connect(p1).cancelOpenChallenge(1);

@@ -16,6 +16,7 @@ contracts:
 CryptoFighterArena                 main deployed arena and settlement coordinator
 ├── uses CryptoFighterVault        CFC reward/ante/credit/treasury accounting
 ├── uses CryptoFighterTokenEscrow  approved-token ante/credit/treasury accounting
+├── uses CryptoFighterRanked       streak eligibility/Fibonacci policy
 └── inherits TraceDispute          trace claim, bisection, correction, finalization
     ├── inherits TraceCommitmentVerifier
     │                              Merkle membership code compiled into the arena
@@ -28,6 +29,10 @@ CryptoFighterArena                 main deployed arena and settlement coordinato
 constructor creates one separate `GameTransitionVerifier`; keeping the rules
 engine separate avoids the EIP-170 runtime-size limit. The helper has no escrow
 or fund-transfer logic.
+
+The local harness uses the optimizer's size-oriented `runs: 1` setting. The
+arena runtime is 24,292 bytes, leaving 284 bytes below EIP-170; future features
+must continue moving cohesive state/logic into modules instead of growing the arena.
 
 ## Current surfaces
 
@@ -43,7 +48,7 @@ or fund-transfer logic.
 | `proveInvalidInput`, `proveEquivocation` | Record objective signed evidence faults separately from the trace verdict. They have no payout or reputation effect. |
 | `prepareTraceClaim`, `prepareTraceChallenge`, `prepareMidpointOpening`, `prepareAdjudicationWitness` | Build and validate calldata-shaped witnesses. They do not send transactions. |
 | `connectWallet` and the browser's **Escrow evidence** panel | Read and verify an already activated local-chain match. The browser sends no contract transaction. |
-| Ranked streak and Fibonacci reward changes | **Unresolved in the arena.** Issue #15 owns these rules. |
+| `CryptoFighterRanked` views and offer state | Expose equal-streak eligibility, exact next-win reward, policy version, active lock, and historical result. |
 
 ## Removed legacy surface
 
@@ -69,7 +74,7 @@ the removed entry points.
 The current local path ends in a vault-accounting result:
 
 1. `challenge` reserves a fresh match ID and records Player 1's partial offer.
-2. `join` supplies Player 2 and replaces the provisional context with the hash
+2. `join` supplies Player 2 and sets the context to the hash
    of the complete `GenesisBinding`.
 3. Both session keys approve that completed binding through `authorizeGenesis`.
 4. Each browser independently reads the activated arena record before entering
@@ -98,14 +103,14 @@ must also check challenge and authorization state.
 
 | Lifecycle point | Stored value | Allowed reliance |
 | --- | --- | --- |
-| After `challenge`, before `join` | Provisional hash of chain, arena, challenge, P1, stake, match ID, rules, P1 session, and response window. | Correlation only. P2 and the completed binding do not exist. |
+| After `challenge`, before `join` | Zero. | P2 and the completed binding do not exist; no authority relies on a partial context. |
 | After `join`, before `authorizeGenesis` | Hash of the complete immutable `GenesisBinding`. | The session keys may authorize it, but it is not activated. |
 | After `authorizeGenesis` | The same completed binding hash plus a separate true authorization flag. | Independently verified escrow admission and current trace context. |
 | After cancellation or unactivated refund | Bytes remain reserved for history. | Historical inspection only; status gates reject current use. |
 | After trace resolution | The binding hash remains immutable and status becomes Settled. | Historical inspection; repeat economic execution is rejected. |
 
-Use **provisional challenge context**, **completed binding hash**, and
-**authorized genesis context** for those stages. Do not call the completed
+Use **open challenge**, **completed binding hash**, and **authorized genesis
+context** for those stages. Do not call the completed
 binding a finalized or settled match.
 
 ## Names that are easy to misread
@@ -126,5 +131,4 @@ binding a finalized or settled match.
 
 The browser still prepares evidence but does not fund matches, monitor deadlines,
 or submit settlement transactions. Archive availability and chain trust remain
-deployment concerns. Ranked streak transitions and Fibonacci rewards belong to
-Issue #15; production deployment and DAO governance remain out of scope.
+deployment concerns. Production deployment and DAO governance remain out of scope.
