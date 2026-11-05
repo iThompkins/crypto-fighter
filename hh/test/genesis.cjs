@@ -139,10 +139,9 @@ describe("Authoritative genesis binding", function () {
     assert.equal(await m.arena.genesisAuthorized(1), false);
   });
 
-  it("blocks settlement facts until authorization and refunds unactivated deposits once", async function () {
+  it("blocks trace facts until authorization and refunds unactivated deposits once", async function () {
     const m = await setup();
-    await rejected(m.arena.claimResult(1, 1, 10, ethers.id("head"), ethers.id("p1"), ethers.id("p2")), "genesis not authorized");
-    await rejected(m.arena.claimTimeout(1, 10, ethers.id("head"), ethers.id("packet")), "genesis not authorized");
+    await rejected(m.arena.publishTraceArchive(1, ethers.id("root"), ethers.id("journal")), "genesis not authorized");
     const deadline = await m.arena.genesisAuthorizationDeadline(1);
     await network.provider.send("evm_setNextBlockTimestamp", [Number(deadline)]);
     await rejected(m.arena.refundUnactivatedMatch(1), "authorization window open");

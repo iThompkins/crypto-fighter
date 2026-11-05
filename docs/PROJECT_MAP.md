@@ -18,7 +18,7 @@ putting the whole match on a blockchain? The implemented answer is:
 That is where the system stops today. It can record which proposed version of a
 disputed step follows the game rules. It does not yet turn that answer into a
 payout, refund, or penalty. Everything involving contracts is restricted to a
-local Hardhat test chain, browser settlement actions are disabled, and this
+local Hardhat test chain, the browser sends no contract transactions, and this
 project must not be used with real funds.
 
 ## The story of one match
@@ -207,25 +207,16 @@ from economic consequences.
 - A production model for chain finality, reorganizations, or trusted RPC data.
 - Public-chain deployment, real-money use, token economics, or reputation.
 
-## The current/legacy contract boundary
+## The current contract boundary
 
 The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) is the authoritative API
 classification and explains how the Solidity source contracts compose into the
 arena deployment.
 
-`CryptoFighterArena.sol` contains an older settlement experiment alongside the
-new trace dispute:
-
-- `claimResult` and `finalizeResult` can accept and pay an unchallenged claimed
-  result in local tests.
-- `disputeResult` treats later signed packets as evidence against that result,
-  even though a packet can be signed without ever being played.
-- `claimTimeout`, `respondTimeout`, and `forfeitTimeout` try to assign a timeout
-  winner without the evidence and policy needed to identify who caused a stall.
-
-These functions are unsafe scaffolding. They are not the settlement half of the
-trace system, even though they can move local test funds. Browser actions that
-would call settlement functions are disabled.
+`CryptoFighterArena.sol` now contains only the shared challenge/genesis lifecycle
+and current trace context. The older optimistic-result and gameplay-timeout
+payout APIs, related state, and disabled browser handlers were removed in Issue
+#9. There are no compatibility stubs and no current result-to-funds function.
 
 There is also a provisional `matchContextHash` when Alice first creates a
 challenge, because Bob is not known yet. When Bob joins, the contract replaces

@@ -87,6 +87,20 @@ mark the old one `Superseded`; do not erase the history.
   not transfer funds, change reputation, or certify an entire trace.
 - **Consequence:** Deterministic execution is complete without inventing economic
   consequences. Settlement waits for explicit policy decisions in Issues #4 and
-  #5; the current/legacy API boundary is documented separately.
+  #5; the current and removed API boundary is documented separately.
 - **Context:** [PHASE_D.md](PHASE_D.md), [PROJECT_COMPLETION.md](PROJECT_COMPLETION.md),
-  [protocol boundary](PROTOCOL_BOUNDARY.md#entry-point-classification)
+  [protocol boundary](PROTOCOL_BOUNDARY.md#current-surfaces)
+
+## D-008 — Remove the legacy payout protocols without compatibility stubs
+
+- **Date:** 2026-10-29
+- **Status:** Accepted
+- **Decision:** Delete the optimistic result and gameplay-timeout payout APIs,
+  their state/events/counters, and their disabled browser integration. Preserve
+  only the shared challenge/genesis lifecycle and current trace protocol.
+- **Consequence:** There is one adjudication direction in current code, and no
+  obsolete API can be mistaken for a usable settlement path. Activated local
+  escrow still lacks a safe general exit; Issue #4 must specify one before any
+  economic effect is implemented.
+- **Context:** [protocol boundary](PROTOCOL_BOUNDARY.md#removed-legacy-surface),
+  [Issue #9](https://github.com/iThompkins/crypto-fighter/issues/9)

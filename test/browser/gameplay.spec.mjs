@@ -21,7 +21,7 @@ async function browserVerify(page, transcript) {
   }, transcript);
 }
 
-test("generated terminal replay agrees in browser and CLI; settlement stays disabled", async ({ page }, testInfo) => {
+test("generated terminal replay agrees in browser and CLI; transaction controls are absent", async ({ page }, testInfo) => {
   const file = testInfo.outputPath("terminal.json");
   execFileSync(process.execPath, ["tools/make-transcript.mjs", file]);
   const transcript = JSON.parse(await readFile(file, "utf8"));
@@ -29,8 +29,10 @@ test("generated terminal replay agrees in browser and CLI; settlement stays disa
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Escrow evidence", exact: true })).toBeVisible();
+  await expect(page.getByText(/Practice games never touch a contract/)).toBeVisible();
   for (const name of ["Challenge (P1)", "Join (P2)", "Claim Result", "Finalize"]) {
-    await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
   }
   await developerMode(page);
   await expect(page.getByRole("heading", { name: "Dispute witness preparation", exact: true })).toBeVisible();

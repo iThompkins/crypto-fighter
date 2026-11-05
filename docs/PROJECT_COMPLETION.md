@@ -5,7 +5,7 @@
 Phase D neutral one-step execution adjudication is implemented and locally
 verified. Phases A, B, and C remain complete. Funding and settlement are disabled.
 The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies current trace,
-legacy payout, compatibility-only, disabled, and unresolved surfaces.
+the removed legacy surface, and unresolved settlement work.
 
 ## Completed components
 
@@ -19,7 +19,7 @@ legacy payout, compatibility-only, disabled, and unresolved surfaces.
 - Separate objective records for signed invalid input and equivocation.
 - Participant root-to-journal integrity commitments without availability claims.
 - Phase C-to-contract claim, midpoint, and adjudication witness preparation.
-- Developer-mode browser witness preparation; all settlement transaction actions remain disabled.
+- Developer-mode browser witness preparation; the browser has no contract transaction actions.
 
 ## Architecture and security invariants
 
@@ -41,7 +41,7 @@ legacy payout, compatibility-only, disabled, and unresolved surfaces.
 - Enforced evidence delivery/availability and recovery beyond local retention/integrity hashes.
 - Approved claim replacement, simultaneous dispute, both-invalid, and equivocation consequences.
 - Approved chain-finality/reorg trust assumptions for transaction-time record refresh.
-- Replacement or removal of unsafe legacy continuation/timeout payout scaffolding after policy integration.
+- Policy and implementation for a safe funded-state exit, without reviving the removed legacy protocols.
 - External security review before any relaxation of local-only/funding containment.
 
 ## Unresolved policy decisions
@@ -74,8 +74,8 @@ legacy payout, compatibility-only, disabled, and unresolved surfaces.
 - Journal publication commits only a hash; it supplies no retrieval channel or delivery proof.
 - A bisection step resolves the isolated disagreement and does not prove a globally earliest
   invalid transition if arbitrary traces diverge and reconverge.
-- Legacy result/timeout payout calls remain unsafe local-only scaffolding and are blocked by an active trace claim.
-- Arena runtime has 837 bytes of EIP-170 headroom at current optimizer settings.
+- The legacy result/timeout payout calls are removed; no current API maps a verdict to funds.
+- Arena runtime is 17,606 bytes, leaving 6,970 bytes of EIP-170 headroom at current optimizer settings.
 
 ## Relevant local commits
 

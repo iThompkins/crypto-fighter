@@ -2,13 +2,13 @@
 
 Crypto Fighter is a React/TypeScript experiment in deterministic two-player fighting-game simulation, signed input transcripts, and optimistic native-token escrow. Two browser peers exchange secp256k1-signed inputs over PeerJS and independently advance the same cumulative state.
 
-> **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited settlement sketch. The trace path can isolate and independently execute one disputed transition, but its neutral verdict has no payout effect. The legacy continuation and timeout payout paths remain unsound. Do not use it with real funds. Browser settlement transactions are disabled. The deployment script permits only the in-process Hardhat network, and the contract constructor rejects chain IDs other than 31337. These are development restrictions, not a proof of settlement safety; a chain ID alone does not establish that funds are valueless.
+> **Prototype warning:** the off-chain game and transcript verifier are an MVP, and CryptoFighterArena is an unaudited escrow/adjudication prototype. The trace path can isolate and independently execute one disputed transition, but its neutral verdict has no payout effect and activated escrow has no general exit. The unsafe legacy result and gameplay-timeout payout APIs have been removed, not replaced. Do not use it with real funds. The browser sends no contract transactions. The deployment script permits only the in-process Hardhat network, and the contract constructor rejects chain IDs other than 31337. These are development restrictions, not a proof of settlement safety; a chain ID alone does not establish that funds are valueless.
 
 Returning after time away? Start with the concise
 [project map](docs/PROJECT_MAP.md), then use its linked
 [invariants](docs/INVARIANTS.md), [roadmap](docs/ROADMAP.md), and
 [decision log](docs/DECISIONS.md) to distinguish current facts from open policy.
-For contract/API names, the [current and legacy protocol boundary](docs/PROTOCOL_BOUNDARY.md)
+For contract/API names, the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md)
 is authoritative.
 
 This document separates the implementation that exists from designs that do not. Claims are tied to [App.tsx](src/App.tsx), [game.ts](src/game.ts), [crypto.ts](src/crypto.ts), [types.ts](src/types.ts), [verifier.ts](src/verifier.ts), [verify-match.mjs](tools/verify-match.mjs), and [CryptoFighterArena.sol](contracts/CryptoFighterArena.sol).
@@ -30,10 +30,9 @@ Settlement stays disabled.
 3. Each connection exchanges fresh challenges and signed HELLO responses. Runtime schema, signature, challenge, slot, and pinned session identity are checked before discovery is admitted.
 4. The host offers an immutable practice or locally verified escrow descriptor. Both peers persist signed readiness, then persist authenticated inputs before sending, acknowledging, or simulating them. Only recursively valid input pairs advance play.
 5. Simulation stops when HP reaches zero or the 300-frame timer expires. Either peer can export and replay the packet/canonical-frame transcript.
-6. The historically named settlement panel can connect a main wallet and prepare
-   evidence. Its challenge, join, legacy `claimResult`, and legacy
-   `finalizeResult` transaction actions are all disabled pending a complete
-   security model. It does not send current trace-dispute transactions.
+6. The **Escrow evidence** panel can connect a main wallet to load and verify an
+   already activated local-chain match and prepare evidence. It sends no contract
+   transaction. Practice mode never reads or writes a contract.
 
 **Controls (symmetric):** A/D or left/right arrows move, W or up-arrow jumps, and Space, F, J, K, or / attacks. Each peer controls only its assigned fighter.
 
@@ -63,8 +62,8 @@ and [Phase C evidence-to-trace integration](docs/PHASE_C.md) for canonical recon
 and self-contained dispute artifacts. [Phase D](docs/PHASE_D.md) documents neutral
 one-step adjudication and the remaining policy boundary.
 The [protocol-boundary guide](docs/PROTOCOL_BOUNDARY.md) classifies shared
-authorization, current trace adjudication, legacy payout methods, and disabled
-browser paths.
+authorization, current trace adjudication, the removed legacy surface, and
+unresolved settlement work.
 
 ## Deterministic cumulative GameState
 
@@ -260,19 +259,17 @@ This change does not authorize payouts or claim on-chain meaning for stateHash.
 - **Main wallet:** injected EVM wallet and msg.sender for escrow. Its challenge/join transaction commits its session address and transfers native stake.
 - **Session key:** ephemeral browser-generated key for per-frame signatures. It pays no gas. Solidity can recover it from disclosed packets.
 
-`onlyParticipant` means exactly `msg.sender == stored p1 or p2` **main-wallet**
-address; it does not authorize session keys. Its uses on `claimResult`,
-`disputeResult`, `claimTimeout`, and `respondTimeout` belong to the legacy path.
-`finalizeResult` and `forfeitTimeout` are permissionless when ready.
-`cancelOpenChallenge` separately requires P1. `challenge` and eligible `join`
-calls are public.
+Current trace functions derive participants from the stored P1/P2 main-wallet
+addresses. Session keys authorize the completed genesis binding and signed input
+facts; they do not become escrow owners. `cancelOpenChallenge` separately
+requires P1. `challenge` and eligible `join` calls are public.
 
-## Legacy local-only payout scaffolding and shared escrow lifecycle
+## Shared local-only escrow lifecycle
 
-The challenge/join/genesis-authorization lifecycle is also used by the current
-trace protocol. The result and gameplay-timeout payout functions below are
-legacy settlement scaffolding and must not define future trace settlement. See
-the [entry-point classification](docs/PROTOCOL_BOUNDARY.md#entry-point-classification).
+The challenge/join/genesis-authorization lifecycle supplies the current trace
+protocol's authoritative context. The older optimistic result and gameplay-timeout
+payout functions were removed in Issue #9 because their evidence could not
+justify moving funds. See the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md).
 
 Only the chain's native token is accepted through payable calls. **ERC-20 and stablecoin support is not implemented.** There is no token address, allowance, transferFrom, oracle, or stable-value mechanism.
 
@@ -283,26 +280,17 @@ challenge requires non-zero native stake, matchId, P1 session address, the sole 
 join requires Open status, a caller other than P1, exactly equal stake, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key (requiring distinct keys), makes the escrow Active but
 not yet authorized for play, and freezes the full GenesisBinding. Its hash replaces
 the provisional matchContextHash. Both session authorizations must activate the
-genesis before result or timeout actions. Unactivated matches refund both deposits
+genesis before current trace actions. Unactivated matches refund both deposits
 after the authorization deadline; their genesis reservations remain permanent.
 
-### Legacy claim, dispute, and finalize
-
-claimResult requires an Active, genesis-authorized match, participant caller, no existing result claim, no active timeout, outcome P1/P2/Tie, and non-zero finalHead. It otherwise stores claimant-supplied outcome, final frame, frame head, and packet heads and starts the deadline.
-
-disputeResult is limited to the other participant while block.timestamp <= the deadline. It requires two packets at claimedFinalFrame + 1, slots 1/2, stored match ID, v1 input masks with no bits above `0x0f`, prevSelfHash links to claimed packet heads, and signatures recovering to stored session keys. It does **not** check prevOppHash, canonical-frame chain, state, terminality, or claimed outcome. Success awards the pot to the disputer and records counters.
-
-That continuation condition does **not** prove execution and is unsound with delayed inputs because signed packets may never have executed.
-
-finalizeResult is permissionless only while block.timestamp > the deadline and pays the trusted outcome: P1/P2 gets the two-stake pot; Tie splits it with P1 getting integer half and P2 any one-wei remainder. The deadline is inclusive for disputes: at the exact timestamp dispute remains available and finalization reverts; finalization begins one timestamp tick later. Stake is zeroed before transfers and settlement paths use a simple reentrancy guard.
-
-### Legacy gameplay timeout and shared cancellation
-
-claimTimeout lets either participant accuse the other while Active, genesis-authorized, and no timeout is active. It requires frame > 0 and non-zero transcriptHead/packetHash, stores them, and starts a deadline.
-
-respondTimeout requires the accused before deadline, a non-regressing frame, and non-zero replacement hashes, then clears the timeout. **No signatures or relationship among these hashes are verified.** After deadline anyone may call forfeitTimeout, awarding the pot to the timeout claimant. This is scaffolding, and the UI exposes none of it.
+### Cancellation and the funded-state gap
 
 Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the stake. Active matches cannot use this cancellation path.
+
+After a joined match is authorized, no current function pays, penalizes, or
+refunds based on a gameplay result or trace verdict. This locked-funds gap is
+deliberate containment, not acceptable production behavior; Issue #4 owns safe
+funded-state exit semantics.
 
 ### Enforced on-chain versus trusted
 
@@ -312,13 +300,11 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 | Main-wallet participants/optional P2 restriction | Enforced |
 | Non-zero identifiers/session keys and 24h minimum | Enforced |
 | Session delegation | Inferred from a main wallet committing its own session address |
-| Disclosed next packets: digest/signers/frame/slots/match/masks/self links | Enforced only in disputeResult |
 | rulesHash | Must equal the sole canonical version fingerprint |
-| Outcome, final frame, frame head, packet heads | Claimant supplied; minimal checks only |
 | Canonical chain/full transcript | Not checked |
 | Isolated trace transition, packet chains, HP/timer/terminal result | Independently recomputed by `GameTransitionVerifier`; no payout consequence |
-| Timeout hashes | Non-zero only; relationship/signatures trusted |
 | Genesis-to-escrow authority | Both session keys sign the frozen binding once; moves retain genesis-only context |
+| Trace verdict economic effect | None; safe payout/refund/penalty policy is unresolved |
 
 ## Current Merkle trace and interactive bisection
 
@@ -364,16 +350,16 @@ authorized trace roots, an off-chain authenticated bisection coordinator, and
 compact Solidity Merkle membership verification. On-chain root claims and interactive bisection turns/deadlines are also implemented
 (see the execution-trace document). Adjacent disputes now end in a neutral
 claimant/challenger/neither execution verdict. Authenticated non-response resolution,
-availability enforcement, and economic recovery remain pending. Trace claims block all legacy
-settlement paths and currently have no payout/recovery entry point. The existing continuation-packet dispute conflicts with this design and
-must eventually be replaced. No full-transcript on-chain replay fallback is planned.
+availability enforcement, and economic recovery remain pending. Trace claims
+have no payout/recovery entry point. The older continuation-packet and gameplay-
+timeout payout APIs were removed rather than adapted. No full-transcript on-chain
+replay fallback is planned.
 
 ## Safety limitations
 
 - Experimental, unaudited contract; no real-fund safety claim.
-- Wrong outcome at the true final frame cannot be disproved by continuation.
-- Pre-signed delayed inputs can falsely satisfy continuation after round end.
-- Unauthenticated timeout hashes can produce unjustified forfeits.
+- Activated escrow has no general payout, penalty, or refund path.
+- Unchallenged trace claims and missed trace responses have no resolution rule.
 - The canonical rules fingerprint and one isolated step are enforced, but an
   unchallenged claim and verdict consequence still require approved settlement policy.
 - Moves intentionally sign only genesis context; authorized use requires the one-time
@@ -382,7 +368,6 @@ must eventually be replaced. No full-transcript on-chain replay fallback is plan
 - PeerJS/browser memory are not hardened custody, privacy, availability, or DoS systems; reset/reload loses keys.
 - Input delay permits limited lookahead; commit-reveal is only proposed.
 - Session delegation now requires distinct session addresses.
-- Reputation counters are event counts, not proof of honesty or skill.
 - UI covers only part of lifecycle and does not monitor deadlines.
 - ERC-20/stablecoins, fees, upgrades, emergency recovery, and production operations are absent.
 
@@ -482,13 +467,14 @@ npm run verify-match -- path/to/transcript.json
 The Hardhat harness is isolated in hh/:
 
 ~~~bash
-npm run test:contract        # deploy to a local EVM; assert happy path + dispute
+npm run test:contract        # deploy to a local EVM; assert lifecycle + trace disputes
 ~~~
 
 The harness uses lockfile-pinned `solc` 0.8.26 without compiler downloads and
 stores its configuration/cache in `.cache/hardhat/`. Tests create only valueless,
 in-process EVM contracts, including a negative test with simulated chain ID 1.
-Browser settlement and the old `hh/e2e-onchain.cjs` workflow are disabled.
+The browser sends no contract transactions, and the old `hh/e2e-onchain.cjs`
+workflow is retired.
 
 `simulate-arena` now exits with a retirement notice: its former JavaScript model
 used a different protocol and must not be treated as contract validation. Use
@@ -497,28 +483,28 @@ used a different protocol and must not be treated as contract validation. Use
 ## Source layout
 
 ~~~text
-contracts/CryptoFighterArena.sol  shared arena plus legacy result/timeout payout
+contracts/CryptoFighterArena.sol  shared arena admission and trace context
 contracts/GameTransitionVerifier.sol independent canonical one-step rules
 contracts/TraceDispute.sol        root claim, bisection, neutral adjudication
-hh/test/settlement.cjs            legacy compatibility/containment tests
+hh/test/match-lifecycle.cjs       challenge/join/cancel lifecycle tests
 hh/test/step-adjudication.cjs     Phase C-to-Solidity adversarial tests
 test/browser/gameplay.spec.mjs   local browser gameplay/replay checks
 tools/verify-match.mjs            CLI adapter for shared transcript verifier
 src/App.tsx                       UI, PeerJS, realtime validation
-src/chain.ts                     injected wallet and minimal Arena ABI
+src/chain.ts                     injected wallet connection for evidence reads
 src/crypto.ts                    keys, signatures, and hashes
 src/game.ts                      deterministic transition
 src/onchain-dispute.ts           verified Phase C-to-contract witness adapter
 src/types.ts                     shared protocol types
 src/verifier.ts                  browser verifier/replayer
-docs/PROTOCOL_BOUNDARY.md        authoritative current/legacy API classification
+docs/PROTOCOL_BOUNDARY.md        authoritative current API and removal boundary
 ~~~
 
 
 ## Verified takeover audit (2026-09-16)
 
 See [AUDIT.md](AUDIT.md) for the code-verified baseline, checks, and ordered blockers.
-Run `npm test` on Node 20.19+ for input-mask parity and browser settlement containment;
+Run `npm test` on Node 20.19+ for protocol and evidence validation;
 the test-only loader uses the installed TypeScript compiler. `npm run build` still
 performs full TypeScript checking. `npm run test:contract` includes a negative
 constructor test on a simulated chain ID 1, entirely inside Hardhat with no external RPC.
