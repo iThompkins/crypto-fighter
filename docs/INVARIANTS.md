@@ -178,8 +178,8 @@ the length of the match.
 to the in-process Hardhat chain, and a trace verdict has no payout or refund
 effect. The older payout functions have been removed.
 
-**Why it matters:** Settlement rules, evidence availability, non-response, and a
-safe exit from every funded state have not been solved.
+**Why it matters:** Settlement rules are now specified, but their accounting,
+non-response exits, and result-to-funds connection have not been implemented.
 
 **Where it is enforced/tested:** [`src/App.tsx`](../src/App.tsx),
 [`src/chain.ts`](../src/chain.ts),
@@ -187,11 +187,12 @@ safe exit from every funded state have not been solved.
 [`hh/test/match-lifecycle.cjs`](../hh/test/match-lifecycle.cjs), and
 [`hh/test/deployment.cjs`](../hh/test/deployment.cjs).
 
-## Important missing guarantee
+## Important unimplemented guarantee
 
-Every funded state should eventually have a safe, objective exit, even if one
-player disappears. The current trace path does not provide that guarantee.
-Silence or a `Neither` verdict can leave local test escrow locked.
+The [settlement policy](SETTLEMENT_POLICY.md) requires every funded state to have
+a safe exit even if one player disappears. The current trace path does not yet
+provide that guarantee. Silence or a `Neither` verdict can still leave local
+test escrow locked.
 
 ## INV-14 — Evidence properties and failure states remain distinct
 
@@ -229,3 +230,45 @@ players can choose the assurance level appropriate for them.
 [`src/genesis.ts`](../src/genesis.ts). The current client pins one provider read;
 production confirmation defaults and reorg recovery remain unimplemented, so
 deployment remains local-only.
+
+## Specified settlement invariants (not yet enforced)
+
+These rules are requirements for Issues #13–#15. Their presence here does not
+make the current contracts settlement-safe.
+
+### INV-16 — Active terms and funds cannot be changed or withdrawn
+
+**Rule:** A funded match snapshots its asset, ante, reward, policy, participants,
+rules, and deadlines. Active escrow and reserved rewards remain separate from
+player credits and settled treasury funds. Owner changes affect only new matches.
+
+**Why it matters:** Neither an administrator nor a later DAO may change a wager
+after acceptance or spend money already owed to an active match.
+
+**Where it is specified:** [`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md). It is
+not implemented.
+
+### INV-17 — Every funded state terminates without clock-reset griefing
+
+**Rule:** Every funded state has a deterministic expired exit callable by anyone.
+Only a valid action completing the current turn starts a new 24-hour window.
+Invalid, duplicate, irrelevant, or partial actions cannot restart the clock.
+
+**Why it matters:** A player can disappear or submit junk, but cannot lock both
+players' funds indefinitely.
+
+**Where it is specified:** [`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md). It is
+not implemented.
+
+### INV-18 — A local step verdict needs a correction window
+
+**Rule:** `Claimant` or `Challenger` at one isolated step selects a surviving
+candidate and advances a verified prefix; it does not immediately authorize a
+complete outcome. The opponent receives one fresh response window to submit a
+corrected later disagreement. `Neither` terminates with no established result.
+
+**Why it matters:** Correctness at one transition does not prove every later
+checkpoint in the surviving trace.
+
+**Where it is specified:** [`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md). It is
+not implemented.

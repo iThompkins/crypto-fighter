@@ -153,12 +153,14 @@ A membership proof proves inclusion only, not correctness of the state or root.
 The root, context, final frame and terminal state must be checked against locally
 rebuilt output when importing a claim.
 
-## Historical target settlement/dispute state machine
+## Trace foundation for the future settlement state machine
 
-The list below records design requirements accumulated during implementation.
-Implemented trace steps stop at neutral adjudication. Payout, non-response, and
-availability consequences remain proposals owned by Issues #4 and #5, not
-current behavior.
+The list below records trace requirements accumulated during implementation.
+Implemented trace steps stop at neutral adjudication. The approved direction for
+payout, non-response, and availability consequences is now in
+[`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md) and
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md), but remains future
+behavior.
 
 1. Authenticate the unique genesis-to-escrow binding and session delegations before signing inputs. Claims
    bind root, format/rules/context, terminal frame, encoded terminal state and

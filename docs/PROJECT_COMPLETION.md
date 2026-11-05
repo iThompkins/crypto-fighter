@@ -5,7 +5,7 @@
 Phase D neutral one-step execution adjudication is implemented and locally
 verified. Phases A, B, and C remain complete. Funding and settlement are disabled.
 The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies current trace,
-the removed legacy surface, and unresolved settlement work.
+the removed legacy surface, and specified-but-unimplemented settlement work.
 
 ## Completed components
 
@@ -36,23 +36,20 @@ the removed legacy surface, and unresolved settlement work.
 
 ## Remaining components
 
-- Policy-approved mapping from neutral verdicts and unchallenged claims to escrow state.
-- Authenticated non-response resolution and objective escrow escape.
+- Implementation of the approved mapping from neutral verdicts and unchallenged claims to escrow state.
+- Authenticated non-response resolution and objective escrow escape using the specified 24-hour windows.
 - Enforced evidence delivery/availability and recovery beyond local retention/integrity hashes.
-- Approved claim replacement, simultaneous dispute, both-invalid, and equivocation consequences.
-- Approved chain-finality/reorg trust assumptions for transaction-time record refresh.
-- Policy and implementation for a safe funded-state exit, without reviving the removed legacy protocols.
+- Correction-cycle, both-invalid, and equivocation behavior specified by the settlement policy.
+- Implementation of the approved chain-finality/reorg trust assumptions for transaction-time record refresh.
+- Safe funded-state exits without reviving the removed legacy protocols.
 - External security review before any relaxation of local-only/funding containment.
 
-## Unresolved policy decisions
+## Policy still owned by later work
 
-- Bonds and challenge-bond economics.
-- Payout recipient/split after claimant, challenger, or neither verdict.
-- Penalties, forfeitures, and reputation consequences for direct evidence faults.
-- Money-governing response and availability timeout durations.
-- Disconnect, abandonment, withheld evidence, and lost-key consequences.
-- Claim replacement and repeated/simultaneous dispute rules.
-- Fees, settlement incentives, and chain-finality/security assumptions.
+- CFC issuance, reward funding, rank eligibility, and streak consequences (#12).
+- Production network confirmation defaults and deployment configuration.
+- Any later bonds, fees, direct-fault penalties, or reputation system; the
+  current settlement policy deliberately adds none.
 
 ## Validation run on 2026-10-01
 
@@ -87,6 +84,6 @@ the removed legacy surface, and unresolved settlement work.
 ## Exact reason the project is not settlement-complete
 
 All deterministic technical work needed to decide an isolated execution step is
-implemented. Further escrow behavior requires the unresolved policy decisions
-above, which change player incentives and fund safety. No such policy has been
-invented in code.
+implemented, and safe funded-state exits are now specified. The CFC policy and
+replacement token/accounting/state-machine contracts are not implemented. No
+current API therefore maps a claim, timeout, or verdict to funds.

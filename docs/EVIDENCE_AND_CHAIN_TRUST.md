@@ -60,7 +60,8 @@ and chain-reorganization risks still exist.
 Alice deletes the browser data and backup containing her dispute evidence. If
 she later cannot answer a required dispute turn, the contract sees only that she
 did not respond in time. It does not need to determine whether she was careless,
-offline, or malicious. Issue #4 defines the disclosed timeout consequence.
+offline, or malicious. The [settlement policy](SETTLEMENT_POLICY.md) defines the
+disclosed timeout consequence.
 
 ### A player stops responding
 
@@ -124,7 +125,8 @@ does not move funds from that verdict.
 | Prove invalid input or equivocation | The signed invalid packet or the two signed conflicting packets. A full archive is not required. |
 
 If a player cannot produce required evidence or an action before the deadline,
-that becomes non-response. Issue #4 defines the fund destination and timing.
+that becomes non-response. The [settlement policy](SETTLEMENT_POLICY.md) defines
+the fund destination and timing.
 
 ## Failure and consequence table
 
@@ -136,16 +138,16 @@ that becomes non-response. Issue #4 defines the fund destination and timing.
 | Archive is partial | Incomplete evidence | Reject it; allow correction until the deadline, then treat failure to correct as non-response. |
 | Archive bytes do not match `journalHash` | Integrity failure | Reject them; allow the correct file until the deadline, then treat failure to correct as non-response. |
 | Malformed or forged message | Invalid/unauthenticated evidence | Reject it. Do not attribute an unsigned forgery to a player. |
-| Two valid conflicting packets | Objective equivocation | Preserve both. Issue #4 decides the economic consequence. |
-| Valid witness matches neither trace root | `StepVerdict.Neither` | This is an execution result, not missing evidence. Issue #4 decides the economic consequence. |
+| Two valid conflicting packets | Objective equivocation | Preserve both. It does not independently choose a winner or reset a settlement deadline. |
+| Valid witness matches neither trace root | `StepVerdict.Neither` | Both candidates fail; the settlement policy terminates with no established result. |
 | Player misses a required transaction deadline | Non-response | Apply the clearly published timeout/exit rule. |
 | RPC is stale, unavailable, malicious, or wrong | Provider failure / retryable uncertainty | Retry, change provider, or use an own node. Deadlines remain a known operational risk. |
 | Transaction lacks configured confirmations | Recent/unconfirmed chain state | Wait before treating it as settled. |
 | Recent blocks are reorganized | Reorg | Reload canonical arena state and resubmit an action only if it is still valid. |
 
-The categories stay distinct for diagnosis and review. Issue #4 may intentionally
-give several categories the same timeout/refund/forfeit result if that behavior
-is simple, disclosed, and leaves no funded state permanently locked.
+The categories stay distinct for diagnosis and review. The settlement policy
+intentionally gives several categories the same timeout result so the rule is
+simple, disclosed, and leaves no funded state permanently locked.
 
 ## RPC, confirmations, and reorgs
 
@@ -183,11 +185,11 @@ or eliminate all provider risk.
 ### EA-001 — Response deadlines and consequences
 
 - **Date:** 2026-10-29
-- **Status:** Open; owned by Issue #4
-- **Decision needed:** Set each response/delivery deadline and the terminating
-  refund, payout, or forfeiture when a player does not respond.
-- **Constraint:** The outcome must be disclosed before play and every funded
-  state must have an exit. It need not prove why the player failed to respond.
+- **Status:** Resolved by [`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md)
+- **Decision:** Use a 24-hour game window and rolling 24-hour dispute turns.
+  Only valid turn completion resets time. Each funded state has a permissionless
+  timeout exit, and non-response receives the published state-specific result
+  without trying to prove motive.
 
 ### EA-002 — Network confirmation defaults
 
@@ -214,4 +216,4 @@ or eliminate all provider risk.
 - Choosing a storage vendor or production network.
 - Implementing reputation, matchmaking filters, backup automation, provider
   switching, confirmation polling, or reorg recovery.
-- Choosing payout economics; Issue #4 owns those consequences.
+- Implementing the payout economics specified by Issue #4.

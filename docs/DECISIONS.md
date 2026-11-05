@@ -100,7 +100,23 @@ mark the old one `Superseded`; do not erase the history.
   only the shared challenge/genesis lifecycle and current trace protocol.
 - **Consequence:** There is one adjudication direction in current code, and no
   obsolete API can be mistaken for a usable settlement path. Activated local
-  escrow still lacks a safe general exit; Issue #4 must specify one before any
-  economic effect is implemented.
+  escrow still lacks an implemented safe exit; D-009 now specifies the required
+  replacement before any economic effect is enabled.
 - **Context:** [protocol boundary](PROTOCOL_BOUNDARY.md#removed-legacy-surface),
   [Issue #9](https://github.com/iThompkins/crypto-fighter/issues/9)
+
+## D-009 — Use 24-hour optimistic settlement with terminating exits
+
+- **Date:** 2026-11-04
+- **Status:** Accepted
+- **Decision:** An authorized game has a 24-hour claim window. A valid claim or
+  completed dispute turn starts a fresh 24-hour response window. Unchallenged or
+  procedurally surviving outcomes settle optimistically; no established result
+  sends both antes to treasury. Expired transitions are callable by anyone.
+- **Consequence:** Non-response has a disclosed economic result without proving
+  motive. One-step correctness still cannot pay immediately: a surviving trace
+  faces a correction window and each later challenge must advance beyond the
+  verified prefix. Active escrow, reserved rewards, player credits, and settled
+  treasury remain separate.
+- **Context:** [settlement policy](SETTLEMENT_POLICY.md),
+  [Issue #4](https://github.com/iThompkins/crypto-fighter/issues/4)

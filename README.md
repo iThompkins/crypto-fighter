@@ -62,8 +62,8 @@ and [Phase C evidence-to-trace integration](docs/PHASE_C.md) for canonical recon
 and self-contained dispute artifacts. [Phase D](docs/PHASE_D.md) documents neutral
 one-step adjudication and the remaining policy boundary.
 The [protocol-boundary guide](docs/PROTOCOL_BOUNDARY.md) classifies shared
-authorization, current trace adjudication, the removed legacy surface, and
-unresolved settlement work.
+authorization, current trace adjudication, the removed legacy surface, and the
+specified-but-unimplemented [settlement policy](docs/SETTLEMENT_POLICY.md).
 
 ## Deterministic cumulative GameState
 
@@ -289,8 +289,9 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 
 After a joined match is authorized, no current function pays, penalizes, or
 refunds based on a gameplay result or trace verdict. This locked-funds gap is
-deliberate containment, not acceptable production behavior; Issue #4 owns safe
-funded-state exit semantics.
+deliberate containment, not acceptable production behavior. Issue #4 specifies
+the replacement exits in [the settlement policy](docs/SETTLEMENT_POLICY.md);
+Issues #13–#15 still have to implement them.
 
 ### Enforced on-chain versus trusted
 

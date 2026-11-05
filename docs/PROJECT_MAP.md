@@ -178,11 +178,11 @@ reconstruct a conflict-free history, commit to a trace, narrow two different
 traces to one transition, and calculate the correct result of that transition.
 That is adjudication: deciding what happened at the isolated game step.
 
-Settlement is later work. The project has no approved rules saying how a trace
-verdict affects deposits, what an unchallenged claim means, what happens when a
-player does not respond, or how every funded match eventually pays out or
-refunds. A correct technical verdict is therefore deliberately disconnected
-from economic consequences.
+Settlement policy is now specified in
+[`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md), but it is not implemented. A
+correct technical verdict therefore remains deliberately disconnected from
+economic consequences until the replacement state machine, token accounting,
+and withdrawals exist and pass review.
 
 ## What is built today
 
@@ -201,9 +201,9 @@ from economic consequences.
 ## What is not built today
 
 - A safe connection from a trace verdict to a payout, refund, or penalty.
-- Complete rules for silence, missing evidence, unavailable archives, or a
-  `Neither` verdict.
-- A guaranteed exit from every state in which test funds are locked.
+- The specified 24-hour game/response deadlines and timeout exits.
+- The correction cycle that turns neutral one-step facts into an accepted result.
+- Segregated active-escrow, reward-reserve, player-credit, and treasury balances.
 - A production model for chain finality, reorganizations, or trusted RPC data.
 - Public-chain deployment, real-money use, token economics, or reputation.
 
@@ -237,6 +237,7 @@ the exact [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-l
 | Trace disagreement | [`src/bisection.ts`](../src/bisection.ts), [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol) | Midpoint comparison, deadlines, and the neutral verdict. |
 | One-step calculation | [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol), [`src/onchain-dispute.ts`](../src/onchain-dispute.ts) | Contract game rules and preparation of the isolated-step data. |
 | Evidence and chain trust | [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md), [`PHASE_B.md`](PHASE_B.md), [`PHASE_C.md`](PHASE_C.md) | Required evidence, retention responsibility, availability failures, RPC/finality assumptions, and reorg handling. |
+| Settlement policy | [`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md) | The 24-hour game/response windows, non-response consequences, funded-state exits, payout matrix, and accounting invariants required before implementation. |
 | Safety boundary | [`PROTOCOL_BOUNDARY.md`](PROTOCOL_BOUNDARY.md), [`INVARIANTS.md`](INVARIANTS.md), [`ROADMAP.md`](ROADMAP.md) | Current/legacy API status, rules changes must preserve, and work that remains. |
 
 ## Short glossary
@@ -259,5 +260,5 @@ the exact [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-l
 - **Bisection:** Repeatedly halving a disagreement until one transition remains.
 - **Adjudication:** Recalculating that transition and recording which proposed
   next checkpoint, if any, is correct.
-- **Settlement:** The unimplemented rules that would turn claims, silence, and
-  adjudication results into payouts or refunds.
+- **Settlement:** The specified but unimplemented state machine that would turn
+  claims, silence, and adjudication results into player credits or treasury funds.

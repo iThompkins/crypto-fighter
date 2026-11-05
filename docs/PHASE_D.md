@@ -6,7 +6,7 @@ turns, or enable settlement.
 
 See the [protocol-boundary guide](PROTOCOL_BOUNDARY.md) for the authoritative
 classification of current trace functions, the removed legacy APIs, the
-non-transactional browser, and unresolved settlement work.
+non-transactional browser, and specified-but-unimplemented settlement work.
 
 ## Contract flow
 
@@ -59,24 +59,15 @@ are objective evidence faults. They are stored separately from trace execution
 verdicts. Duplicate proofs are rejected. Neither kind changes funds, statistics,
 or the dispute verdict.
 
-## Remaining policy boundary
+## Remaining implementation boundary
 
-Technical execution is no longer the blocker. The following decisions have
-materially different consequences for players and funds and remain intentionally
-unimplemented:
+The [settlement policy](SETTLEMENT_POLICY.md) now defines 24-hour game and
+response windows, state-specific non-response exits, both-invalid handling,
+segregated accounting, and a correction window after a one-step verdict. The
+[evidence/chain policy](EVIDENCE_AND_CHAIN_TRUST.md) defines the associated
+availability assumptions. Issue #12 still owns CFC issuance and ranked reward
+policy; Issues #13–#15 own implementation.
 
-- what a claimant, challenger, or neither verdict does to the escrow;
-- whether a valid isolated step is enough to replace a claimed result, or only
-  to reject one root;
-- consequences for equivocation, invalid signed input, or both-invalid traces;
-- which participant owes each response, consequences of non-response, and any
-  money-governing timeout duration;
-- claim replacement and simultaneous or repeated dispute rules;
-- what availability commitment/delivery mechanism is required and what happens
-  when evidence is withheld or lost;
-- canonical-chain finality/reorg assumptions for fresh activation checks;
-- bonds, fees, forfeitures, payout splits, reputation, and settlement incentives.
-
-Until those are approved, trace verdicts are neutral facts, every client
-artifact says `settlementEligible: false`, and the browser sends no contract
-transaction. The unsafe legacy payout paths were removed in Issue #9.
+Until those contracts and clients exist, trace verdicts remain neutral facts,
+every client artifact says `settlementEligible: false`, and the browser sends no
+contract transaction. The unsafe legacy payout paths were removed in Issue #9.
