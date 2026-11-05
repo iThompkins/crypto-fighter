@@ -33,7 +33,7 @@ async function fixture(divergence = 151) {
   const {arena,coin,vault} = await deployArena([p1,p2]);
   const sessions = [ethers.Wallet.createRandom(), ethers.Wallet.createRandom()];
   const genesis = ethers.randomBytes(32);
-  await arena.connect(p1).challenge(genesis, await arena.CANONICAL_RULES_HASH(), sessions[0].address, p2.address, await coin.getAddress());
+  await arena.connect(p1).challenge(genesis, await arena.CANONICAL_RULES_HASH(), sessions[0].address, p2.address, await coin.getAddress(), false);
   await arena.connect(p2).join(1, sessions[1].address);
   await arena.authorizeGenesis(1, sessions[0].signingKey.sign(await arena.genesisAuthorizationDigest(1,1)).serialized, sessions[1].signingKey.sign(await arena.genesisAuthorizationDigest(1,2)).serialized);
   const context = (await arena.getChallenge(1)).matchContextHash;

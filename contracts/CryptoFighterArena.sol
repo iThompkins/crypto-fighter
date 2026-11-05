@@ -2,23 +2,23 @@
 pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {CryptoFighterVault} from "./CryptoFighterVault.sol";
 import {CryptoFighterTokenEscrow} from "./CryptoFighterTokenEscrow.sol";
+import {CryptoFighterRanked} from "./CryptoFighterRanked.sol";
 import {TraceDispute} from "./TraceDispute.sol";
 
 /// @notice Funded match admission, trace adjudication, and pull-based settlement.
 /// @dev Every financial term is snapshotted before either player can join.
-contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
+contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
+    error InvalidModule();
+    error RankedRequiresCfc();
     bytes32 public constant CANONICAL_RULES_HASH =
         0x45e7b6011925954ee1b15160173864f8deea010e005bd0c4dfca5fbc1d503a18;
-    bytes32 public constant GENESIS_BINDING_TAG = keccak256("CryptoFighter.GenesisBinding.v2");
-    bytes32 public constant GENESIS_AUTHORIZATION_TAG = keccak256("CryptoFighter.GenesisAuthorization.v1");
-    uint64 public constant RESPONSE_WINDOW_SECONDS = 24 hours;
-    uint256 public constant CFC_ANTE = 1 ether;
-    uint256 public constant BASE_REWARD = 1 ether;
+    bytes32 private constant GENESIS_BINDING_TAG = keccak256("CryptoFighter.GenesisBinding.v2");
+    bytes32 private constant GENESIS_AUTHORIZATION_TAG = keccak256("CryptoFighter.GenesisAuthorization.v1");
+    uint64 private constant RESPONSE_WINDOW_SECONDS = 24 hours;
+    uint256 private constant BASE_REWARD = 1 ether;
 
     enum MatchStatus { None, Open, Active, Cancelled, Settled }
     enum SettlementResult { None, P1Win, P2Win, Draw, NoResult }
@@ -39,6 +39,7 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         address p1SessionKey;
         address p2SessionKey;
         address restrictedOpponent;
+        bool ranked;
         MatchStatus status;
         SettlementResult result;
     }
@@ -62,6 +63,7 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
 
     CryptoFighterVault public immutable cfcVault;
     CryptoFighterTokenEscrow public immutable tokenEscrow;
+    CryptoFighterRanked public immutable rankedPolicy;
     IERC20 public immutable cfc;
 
     uint256 public nextChallengeId = 1;
@@ -77,11 +79,8 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         address indexed anteToken,
         uint256 anteAmount,
         uint256 rewardAmount,
-        bytes32 matchId,
-        bytes32 rulesHash,
-        bytes32 matchContextHash,
-        address p1SessionKey,
-        address restrictedOpponent
+        bool ranked,
+        bytes32 matchId
     );
     event ChallengeJoined(uint256 indexed challengeId, address indexed joiner, address p2SessionKey);
     event ChallengeCancelled(uint256 indexed challengeId);
@@ -92,20 +91,24 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
     constructor(
         CryptoFighterVault cfcVault_,
         CryptoFighterTokenEscrow tokenEscrow_,
-        address initialOwner
-    ) Ownable(initialOwner) {
+        CryptoFighterRanked rankedPolicy_
+    ) {
         require(block.chainid == 31337, "prototype: local chain only");
-        require(address(cfcVault_).code.length > 0, "invalid CFC vault");
-        require(address(tokenEscrow_).code.length > 0, "invalid token escrow");
+        if (
+            address(cfcVault_).code.length == 0 || address(tokenEscrow_).code.length == 0
+                || address(rankedPolicy_).code.length == 0
+        ) revert InvalidModule();
         cfcVault = cfcVault_;
         tokenEscrow = tokenEscrow_;
+        rankedPolicy = rankedPolicy_;
         cfc = cfcVault_.cfc();
     }
 
-    /// @notice Complete the two-step operator handoff after both vault owners nominate this arena.
-    function acceptVaultOperatorRoles() external onlyOwner {
+    /// @notice Complete operator handoff after the three module owners nominate this arena.
+    function acceptOperatorRoles() external {
         cfcVault.acceptOperator();
         tokenEscrow.acceptOperator();
+        rankedPolicy.acceptOperator();
     }
 
     function getChallenge(uint256 challengeId) external view returns (Challenge memory) {
@@ -127,60 +130,47 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         bytes32 rulesHash,
         address p1SessionKey,
         address expectedOpponent,
-        address anteToken
+        address anteToken,
+        bool ranked
     ) external nonReentrant returns (uint256 challengeId) {
         require(matchId != bytes32(0), "matchId required");
         require(challengeForGenesis[matchId] == 0, "genesis already registered");
         require(rulesHash == CANONICAL_RULES_HASH, "unsupported canonical rules");
         require(p1SessionKey != address(0), "session key required");
+        if (ranked && anteToken != address(cfc)) revert RankedRequiresCfc();
 
-        uint256 anteAmount = anteToken == address(cfc)
-            ? CFC_ANTE
-            : tokenEscrow.requiredAnte(anteToken);
+        uint256 anteAmount = anteToken == address(cfc) ? BASE_REWARD : tokenEscrow.requiredAnte(anteToken);
         challengeId = nextChallengeId++;
+        uint256 rewardAmount = BASE_REWARD;
+        if (ranked) (, rewardAmount,) = rankedPolicy.prepareOffer(challengeId, msg.sender, expectedOpponent);
         bytes32 reservationId = keccak256(abi.encode(address(this), challengeId, matchId));
-        bytes32 matchContextHash = keccak256(abi.encode(
-            block.chainid,
-            address(this),
-            challengeId,
-            msg.sender,
-            anteToken,
-            anteAmount,
-            BASE_REWARD,
-            matchId,
-            rulesHash,
-            p1SessionKey,
-            expectedOpponent,
-            RESPONSE_WINDOW_SECONDS
-        ));
-
         challengeForGenesis[matchId] = challengeId;
         challenges[challengeId] = Challenge({
             p1: msg.sender,
             p2: address(0),
             anteToken: anteToken,
             anteAmount: anteAmount,
-            rewardAmount: BASE_REWARD,
+            rewardAmount: rewardAmount,
             rewardReservationId: reservationId,
             createdAt: uint64(block.timestamp),
             joinedAt: 0,
             gameDeadline: 0,
             matchId: matchId,
             rulesHash: rulesHash,
-            matchContextHash: matchContextHash,
+            matchContextHash: bytes32(0),
             p1SessionKey: p1SessionKey,
             p2SessionKey: address(0),
             restrictedOpponent: expectedOpponent,
+            ranked: ranked,
             status: MatchStatus.Open,
             result: SettlementResult.None
         });
 
-        cfcVault.reserveReward(reservationId, BASE_REWARD);
+        cfcVault.reserveReward(reservationId, rewardAmount);
         _depositAnte(anteToken, matchId, msg.sender, anteAmount);
 
         emit ChallengeCreated(
-            challengeId, msg.sender, anteToken, anteAmount, BASE_REWARD, matchId,
-            rulesHash, matchContextHash, p1SessionKey, expectedOpponent
+            challengeId, msg.sender, anteToken, anteAmount, rewardAmount, ranked, matchId
         );
     }
 
@@ -192,6 +182,7 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         require(p2SessionKey != c.p1SessionKey, "distinct session keys required");
         require(c.restrictedOpponent == address(0) || c.restrictedOpponent == msg.sender, "opponent locked");
 
+        if (c.ranked) rankedPolicy.joinOffer(challengeId, c.p1, msg.sender);
         _depositAnte(c.anteToken, c.matchId, msg.sender, c.anteAmount);
         c.p2 = msg.sender;
         c.joinedAt = uint64(block.timestamp);
@@ -226,6 +217,7 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         require(c.status == MatchStatus.Open, "not open");
         require(msg.sender == c.p1, "only challenger");
         c.status = MatchStatus.Cancelled;
+        if (c.ranked) rankedPolicy.releaseOpenOffer(challengeId, c.p1);
         _creditAnte(c, c.p1);
         cfcVault.releaseReward(c.rewardReservationId);
         emit ChallengeCancelled(challengeId);
@@ -237,6 +229,7 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         require(!genesisAuthorized[challengeId], "genesis already authorized");
         require(block.timestamp > genesisAuthorizationDeadline[challengeId], "authorization window open");
         c.status = MatchStatus.Cancelled;
+        if (c.ranked) rankedPolicy.releaseJoinedMatch(challengeId, c.p1, c.p2);
         _creditAnte(c, c.p1);
         _creditAnte(c, c.p2);
         cfcVault.releaseReward(c.rewardReservationId);
@@ -285,6 +278,7 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         require(result != SettlementResult.None, "missing result");
         c.status = MatchStatus.Settled;
         c.result = result;
+        if (c.ranked) rankedPolicy.settle(id, c.p1, c.p2, uint8(result));
 
         address winner;
         if (result == SettlementResult.P1Win) {
@@ -329,7 +323,4 @@ contract CryptoFighterArena is TraceDispute, Ownable2Step, ReentrancyGuard {
         }
     }
 
-    function renounceOwnership() public view override onlyOwner {
-        revert("ownership renunciation disabled");
-    }
 }

@@ -25,7 +25,7 @@ async function setup(options = {}) {
   const matchId = options.matchId ?? ethers.hexlify(ethers.randomBytes(32));
   const s1 = options.s1 ?? ethers.Wallet.createRandom(), s2 = options.s2 ?? ethers.Wallet.createRandom();
   const stake = CFC;
-  await (await arena.connect(p1).challenge(matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress())).wait();
+  await (await arena.connect(p1).challenge(matchId, await arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await coin.getAddress(), false)).wait();
   const joined = await (await arena.connect(p2).join(1, s2.address)).wait();
   const locator = { chainId: "31337", arena: await arena.getAddress(), challengeId: "1" };
   const record = await genesis.readGenesisRecord(ethers.provider, locator, joined.blockNumber);
@@ -105,7 +105,7 @@ describe("Authoritative genesis binding", function () {
     const matchId = ethers.hexlify(ethers.randomBytes(32));
     const rulesHash = await arena.CANONICAL_RULES_HASH();
     const cfcAddress = await coin.getAddress();
-    const open = () => arena.challenge(matchId, rulesHash, p1.address, ethers.ZeroAddress, cfcAddress);
+    const open = () => arena.challenge(matchId, rulesHash, p1.address, ethers.ZeroAddress, cfcAddress, false);
     await (await open()).wait();
     await rejected(open(), "genesis already registered");
     await (await arena.cancelOpenChallenge(1)).wait();

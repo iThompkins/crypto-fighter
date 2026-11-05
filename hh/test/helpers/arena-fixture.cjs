@@ -10,19 +10,22 @@ async function deployArena(players = []) {
   const vault = await Vault.deploy(await coin.getAddress(), owner.address, owner.address);
   const TokenEscrow = await ethers.getContractFactory("CryptoFighterTokenEscrow");
   const tokenEscrow = await TokenEscrow.deploy(owner.address, owner.address);
+  const Ranked = await ethers.getContractFactory("CryptoFighterRanked");
+  const ranked = await Ranked.deploy(owner.address, owner.address);
   const Arena = await ethers.getContractFactory("CryptoFighterArena");
-  const arena = await Arena.deploy(await vault.getAddress(), await tokenEscrow.getAddress(), owner.address);
+  const arena = await Arena.deploy(await vault.getAddress(), await tokenEscrow.getAddress(), await ranked.getAddress());
 
   await vault.beginOperatorTransfer(await arena.getAddress());
   await tokenEscrow.beginOperatorTransfer(await arena.getAddress());
-  await arena.acceptVaultOperatorRoles();
+  await ranked.beginOperatorTransfer(await arena.getAddress());
+  await arena.acceptOperatorRoles();
 
   const rewardFunding = ethers.parseEther("1000");
   await coin.mint(owner.address, rewardFunding);
   await coin.approve(await vault.getAddress(), rewardFunding);
   await vault.fundRewards(rewardFunding);
   for (const player of players) await fundCfc({ coin, vault }, player);
-  return { owner, coin, vault, tokenEscrow, arena };
+  return { owner, coin, vault, tokenEscrow, ranked, arena };
 }
 
 async function fundCfc({ coin, vault }, player, amount = ethers.parseEther("100")) {
@@ -39,7 +42,7 @@ async function createCfcMatch(ctx, { p1, p2, matchId, s1, s2, authorize = true }
   s1 ??= ethers.Wallet.createRandom();
   s2 ??= ethers.Wallet.createRandom();
   await ctx.arena.connect(p1).challenge(
-    matchId, await ctx.arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await ctx.coin.getAddress()
+    matchId, await ctx.arena.CANONICAL_RULES_HASH(), s1.address, p2.address, await ctx.coin.getAddress(), false
   );
   await ctx.arena.connect(p2).join(1, s2.address);
   if (authorize) {

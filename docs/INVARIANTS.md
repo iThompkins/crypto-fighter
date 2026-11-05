@@ -57,7 +57,7 @@ independently verified arena record.
 [`test/genesis-authorization.test.mjs`](../test/genesis-authorization.test.mjs),
 and [`hh/test/genesis.cjs`](../hh/test/genesis.cjs).
 
-The provisional, completed, and authorized context states are distinguished in
+The open, completed, and authorized context states are distinguished in
 the [protocol-boundary guide](PROTOCOL_BOUNDARY.md#matchcontexthash-lifecycle).
 
 ## INV-05 — Save a message before sending or using it

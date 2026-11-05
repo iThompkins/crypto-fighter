@@ -168,3 +168,35 @@ test('browser verifies locally read escrow delegation before authenticated live 
     expect(JSON.stringify(rows)).not.toContain('privateKey');
   }
 });
+
+test('ranked preview shows exact risk, eligibility, Fibonacci reward and reserve before confirmation', async ({ page }) => {
+  const { Interface } = await import('ethers');
+  const { RANKED_ARENA_ABI, RANKED_POLICY_ABI, RANKED_VAULT_ABI } = await import('../../src/ranked.ts');
+  const arena = '0x' + 'aa'.repeat(20), ranked = '0x' + 'bb'.repeat(20), vault = '0x' + 'cc'.repeat(20);
+  const p1 = '0x' + '11'.repeat(20), p2 = '0x' + '22'.repeat(20);
+  const arenaInterface = new Interface(RANKED_ARENA_ABI);
+  const rankedInterface = new Interface(RANKED_POLICY_ABI);
+  const vaultInterface = new Interface(RANKED_VAULT_ABI);
+  const replies = {
+    [arenaInterface.getFunction('rankedPolicy').selector]: arenaInterface.encodeFunctionResult('rankedPolicy', [ranked]),
+    [arenaInterface.getFunction('cfcVault').selector]: arenaInterface.encodeFunctionResult('cfcVault', [vault]),
+    [rankedInterface.getFunction('eligibility').selector]: rankedInterface.encodeFunctionResult('eligibility', [true, 8, 34n * 10n ** 18n, 3]),
+    [vaultInterface.getFunction('availableRewards').selector]: vaultInterface.encodeFunctionResult('availableRewards', [100n * 10n ** 18n]),
+  };
+  await page.goto('/');
+  await page.evaluate(({ replies, p1 }) => {
+    window.ethereum = { request: async ({ method, params }) => {
+      if (method === 'eth_chainId') return '0x7a69';
+      if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [p1];
+      if (method === 'eth_blockNumber') return '0x1';
+      if (method === 'eth_call') return replies[params[0].data.slice(0, 10)];
+      throw new Error(`Unexpected wallet request ${method}`);
+    } };
+  }, { replies, p1 });
+  await page.getByRole('button', { name: 'Connect Wallet', exact: true }).click();
+  await page.getByPlaceholder('Arena contract address (0x...)').fill(arena);
+  await page.getByPlaceholder('Ranked opponent wallet (0x...)').fill(p2);
+  await page.getByRole('button', { name: 'Preview ranked terms', exact: true }).click();
+  await expect(page.getByText(/exactly 1 CFC at risk; streak 8; next win pays 34.0 CFC/)).toBeVisible();
+  await expect(page.getByText(/same-rank opponent eligible; reward reserved on confirmation; policy v3/)).toBeVisible();
+});

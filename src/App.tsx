@@ -16,6 +16,7 @@ import { buildEvidenceBundle } from "./evidence-trace";
 import { prepareAdjudicationWitness, prepareMidpointOpening, prepareTraceClaim, type AdjudicationComparison } from "./onchain-dispute";
 import { hello, verifyHello } from "./live-discovery";
 import { createGenesisSession, hashGenesisBinding, verifyGenesisConsent, readGenesisRecord, type GenesisAuthorization, type GenesisRecord } from "./genesis";
+import { rankedPreviewText, readRankedPreview } from "./ranked";
 import type { CanonicalFrame, GameState, MatchTranscript, PlayerSlot, SessionWallet, SignedInputPacket } from "./types";
 
 // Keys the game consumes; preventDefault so arrows/space don't scroll the page.
@@ -70,6 +71,8 @@ export default function App() {
   const [chainLabel, setChainLabel] = useState("");
   const [arenaAddress, setArenaAddress] = useState("");
   const [onchainChallengeId, setOnchainChallengeId] = useState("");
+  const [rankedOpponent, setRankedOpponent] = useState("");
+  const [rankedPreview, setRankedPreview] = useState("");
   const mainSignerRef = useRef<Signer | null>(null);
 
   const matchIdRef = useRef(matchId);
@@ -597,6 +600,20 @@ export default function App() {
     }
   }
 
+  async function previewRankedOffer() {
+    try {
+      const signer = mainSignerRef.current;
+      if (!signer?.provider) throw new Error("Connect the main wallet first");
+      const preview = await readRankedPreview(
+        signer.provider,
+        arenaAddress.trim(),
+        await signer.getAddress(),
+        rankedOpponent.trim(),
+      );
+      setRankedPreview(rankedPreviewText(preview));
+    } catch (error) { setLastError(String(error)); }
+  }
+
   async function copy(text: string) {
     try {
       if (navigator.clipboard?.writeText) {
@@ -1042,6 +1059,16 @@ export default function App() {
                 placeholder="Arena contract address (0x...)"
               />
             </div>
+            <div style={styles.row}>
+              <input
+                style={styles.input}
+                value={rankedOpponent}
+                onChange={(event) => setRankedOpponent(event.target.value)}
+                placeholder="Ranked opponent wallet (0x...)"
+              />
+              <button style={styles.smallButton} onClick={() => void previewRankedOffer()}>Preview ranked terms</button>
+            </div>
+            <div style={styles.sub}>{rankedPreview || "Ranked preview is read-only and sends no transaction."}</div>
             <div style={styles.row}>
               <input
                 style={styles.input}
