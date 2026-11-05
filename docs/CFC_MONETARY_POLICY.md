@@ -17,7 +17,8 @@ pay a reward.
   created and when it is joined.
 - A ranked winner gets their own 1 CFC ante back plus the next Fibonacci reward.
   The loser ante becomes treasury funds and the loser streak resets to zero.
-- A verified draw returns both antes, pays no reward, and preserves both streaks.
+- A verified draw sends both antes to treasury, pays no reward, and preserves
+  both streaks.
 - A funded match that ends with no established result pays no reward, sends both
   antes to treasury, and resets both streaks.
 - Approved stablecoin matches are unranked. Their winner receives their own ante
@@ -139,15 +140,15 @@ Streak state changes only once, as part of terminal economic settlement:
 | --- | --- | --- | --- |
 | Player 1 wins | Increment from snapshotted equal streak | Reset to 0 | Reserved Fibonacci reward to Player 1 |
 | Player 2 wins | Reset to 0 | Increment from snapshotted equal streak | Reserved Fibonacci reward to Player 2 |
-| Verified draw | Preserve | Preserve | Return reservation to vault |
+| Verified draw | Preserve | Preserve | Return reward reservation; both antes go to treasury |
 | No established result | Reset to 0 | Reset to 0 | Return reservation to vault |
 | Offer cancelled before join | Unchanged | Unchanged | Return reservation to vault |
 | Joined match never authorized | Unchanged | Unchanged | Return reservation to vault |
 
 Resetting both players after no established result prevents a player from
 preserving a valuable streak by withholding the evidence needed to decide a
-match. A verified draw differs because the protocol established a real game
-outcome rather than failing to establish one.
+match. A verified draw preserves both streaks because the protocol established
+a real game outcome, but its two antes still become treasury funds.
 
 Stablecoin and other unranked matches never read or write `rankedStreak`, even if
 their winner receives the flat base CFC reward.
