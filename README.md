@@ -289,9 +289,8 @@ Before join only P1 may cancelOpenChallenge; it marks Cancelled and refunds the 
 
 After a joined match is authorized, no current function pays, penalizes, or
 refunds based on a gameplay result or trace verdict. This locked-funds gap is
-deliberate containment, not acceptable production behavior. Issue #4 specifies
-the replacement exits in [the settlement policy](docs/SETTLEMENT_POLICY.md);
-Issues #13–#15 still have to implement them.
+deliberate containment, not acceptable production behavior; Issue #4 owns safe
+funded-state exit semantics.
 
 ### Enforced on-chain versus trusted
 
