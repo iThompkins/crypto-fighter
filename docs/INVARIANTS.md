@@ -178,8 +178,8 @@ the length of the match.
 to the in-process Hardhat chain, and a trace verdict has no payout or refund
 effect. The older payout functions have been removed.
 
-**Why it matters:** Settlement rules, evidence availability, non-response, and a
-safe exit from every funded state have not been solved.
+**Why it matters:** Settlement rules are specified, but the accounting,
+non-response exits, and result-to-funds connection are not implemented.
 
 **Where it is enforced/tested:** [`src/App.tsx`](../src/App.tsx),
 [`src/chain.ts`](../src/chain.ts),
@@ -189,9 +189,9 @@ safe exit from every funded state have not been solved.
 
 ## Important missing guarantee
 
-Every funded state should eventually have a safe, objective exit, even if one
-player disappears. The current trace path does not provide that guarantee.
-Silence or a `Neither` verdict can leave local test escrow locked.
+The [settlement policy](SETTLEMENT_POLICY.md) requires a safe exit from every
+funded state. The current trace path does not provide that guarantee; silence or
+a `Neither` verdict can still leave local test escrow locked.
 
 ## INV-14 — Evidence properties and failure states remain distinct
 

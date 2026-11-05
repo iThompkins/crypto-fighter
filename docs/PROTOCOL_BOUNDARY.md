@@ -1,8 +1,9 @@
 # Current protocol boundary
 
 This document is the authoritative guide to the contract and client surfaces
-that currently exist. It distinguishes the implemented trace protocol from
-unresolved settlement work and records the legacy surface removed in Issue #9.
+that currently exist. It distinguishes the implemented trace protocol from the
+specified-but-unimplemented settlement work and records the legacy surface
+removed in Issue #9.
 
 Current does not mean settlement-safe. The arena is an unaudited, local-chain
 prototype, and trace verdicts have no economic effect.
@@ -39,7 +40,7 @@ or fund-transfer logic.
 | `proveInvalidInput`, `proveEquivocation` | Record objective signed evidence faults separately from the trace verdict. They have no payout or reputation effect. |
 | `prepareTraceClaim`, `prepareTraceChallenge`, `prepareMidpointOpening`, `prepareAdjudicationWitness` | Build and validate calldata-shaped witnesses. They do not send transactions. |
 | `connectWallet` and the browser's **Escrow evidence** panel | Read and verify an already activated local-chain match. The browser sends no contract transaction. |
-| Payout/refund/penalty after a trace verdict, an unchallenged claim, non-response, or unavailable evidence | **Unresolved.** Issues #4 and #5 must specify these rules before implementation. |
+| Payout/refund/penalty after a trace verdict, an unchallenged claim, non-response, or unavailable evidence | **Specified, not implemented.** See [`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md); current calls still move no funds. |
 
 ## Removed legacy surface
 
@@ -57,8 +58,8 @@ APIs:
 
 No reverting stubs remain. This is an intentional clean break for a local-only
 prototype with no production deployment or persisted-state migration. The
-removal does not add a safe exit for activated escrow; that gap remains explicit
-work in Issue #4.
+removal does not add the safe exits now specified by Issue #4; implementation
+remains explicit work in Issues #13–#15.
 
 ## Authoritative current trace path
 
@@ -116,9 +117,10 @@ binding a finalized or settled match.
 | Merkle “proof” | Proof a checkpoint belongs to a submitted root. | Proof the checkpoint follows the game rules. |
 | transcript `final` | The end of reconstructed gameplay. | Settled funds. |
 
-## Unresolved policy
+## Specified future policy
 
-[Issue #5](https://github.com/iThompkins/crypto-fighter/issues/5) owns evidence
-availability and chain trust assumptions. [Issue #4](https://github.com/iThompkins/crypto-fighter/issues/4)
-owns safe settlement and funded-state exit semantics. Neither may treat removed
-legacy behavior as an implicit default.
+[`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md) specifies practical
+availability and chain assumptions. [`SETTLEMENT_POLICY.md`](SETTLEMENT_POLICY.md)
+specifies safe funded-state exits for Issue #4. Neither changes current contract
+behavior or revives removed legacy behavior. CFC monetary policy remains in
+Issue #12, followed by implementation in Issues #13–#15.

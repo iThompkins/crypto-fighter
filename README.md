@@ -62,8 +62,8 @@ and [Phase C evidence-to-trace integration](docs/PHASE_C.md) for canonical recon
 and self-contained dispute artifacts. [Phase D](docs/PHASE_D.md) documents neutral
 one-step adjudication and the remaining policy boundary.
 The [protocol-boundary guide](docs/PROTOCOL_BOUNDARY.md) classifies shared
-authorization, current trace adjudication, the removed legacy surface, and
-unresolved settlement work.
+authorization, current trace adjudication, the removed legacy surface, and the
+specified-but-unimplemented [settlement policy](docs/SETTLEMENT_POLICY.md).
 
 ## Deterministic cumulative GameState
 

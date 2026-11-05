@@ -100,7 +100,7 @@ mark the old one `Superseded`; do not erase the history.
   only the shared challenge/genesis lifecycle and current trace protocol.
 - **Consequence:** There is one adjudication direction in current code, and no
   obsolete API can be mistaken for a usable settlement path. Activated local
-  escrow still lacks a safe general exit; Issue #4 must specify one before any
-  economic effect is implemented.
+  escrow still lacks an implemented safe exit; Issue #4's settlement policy now
+  specifies the replacement required before any economic effect is enabled.
 - **Context:** [protocol boundary](PROTOCOL_BOUNDARY.md#removed-legacy-surface),
   [Issue #9](https://github.com/iThompkins/crypto-fighter/issues/9)
