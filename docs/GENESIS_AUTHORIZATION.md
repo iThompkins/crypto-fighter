@@ -81,7 +81,8 @@ remain review items before funds are enabled.
 
 There is one canonical rules fingerprint, not match-specific gameplay options.
 `stake` is the snapshotted per-player amount of `anteToken`; `rewardAmount` is
-the reserved CFC promise. Escrow response deadlines do not change gameplay.
+the deterministic CFC amount the protocol may mint only after an accepted
+winning settlement. Escrow response deadlines do not change gameplay.
 
 ```
 bindingTag = keccak256(UTF8("CryptoFighter.GenesisBinding.v2"))

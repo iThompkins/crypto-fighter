@@ -1,10 +1,12 @@
 # Roadmap
 
-Implemented now: local gameplay, durable evidence, trace adjudication, approved-token
-settlement, and same-streak CFC Fibonacci rewards with segregated vaults.
+Implemented now: local gameplay, durable evidence, trace adjudication,
+approved-token settlement, and protocol-minted CFC rewards with same-streak
+Fibonacci ranking and segregated vault accounting.
 
-Not implemented: public-chain operations, browser transaction flows, DAO
-governance, archive delivery enforcement, or external security review.
+Not implemented: public-chain operations, browser settlement/withdrawal
+transactions, DAO governance, archive delivery enforcement, or external
+security review.
 
 The current trace path, removed legacy surface, and unresolved work are
 classified in the [protocol-boundary guide](PROTOCOL_BOUNDARY.md).

@@ -2,14 +2,14 @@
 
 Crypto Fighter is a React/TypeScript experiment in deterministic two-player fighting-game simulation, signed input transcripts, and optimistic ERC-20 escrow. Two browser peers exchange secp256k1-signed inputs over PeerJS and independently advance the same cumulative state.
 
-> **Prototype warning:** the off-chain game, settlement contracts, and transcript verifier are unaudited prototypes. The local arena now has tested exits for funded CFC and approved ERC-20 matches, but it is not production-safe and the browser still sends no contract transactions. Do not use it with real funds. Deployment permits only the in-process Hardhat network, and the contracts reject chain IDs other than 31337. These are development restrictions, not a security proof.
+> **Prototype warning:** the off-chain game, settlement contracts, and transcript verifier are unaudited prototypes. The local arena has tested exits for funded CFC and approved ERC-20 matches, and the browser can create or join offers only on the local chain; it does not submit settlement transactions. Do not use it with real funds. Deployment permits only the in-process Hardhat network, and the contracts reject chain IDs other than 31337. These are development restrictions, not a security proof.
 
 Returning after time away? Start with the concise
 [project map](docs/PROJECT_MAP.md), then use its linked
 [invariants](docs/INVARIANTS.md), [roadmap](docs/ROADMAP.md), and
 [decision log](docs/DECISIONS.md) to distinguish current facts from open policy.
 For contract/API names, the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md)
-is authoritative. The CFC supply, ranked streak, reward-reserve, treasury, and
+is authoritative. The CFC supply, ranked streak, gameplay-mint, treasury, and
 owner-to-DAO rules are specified separately in the
 [CFC monetary policy](docs/CFC_MONETARY_POLICY.md). The token, segregated vaults,
 base settlement, and same-streak Fibonacci-ranked matches exist locally.
@@ -58,15 +58,16 @@ The arena now permanently registers that genesis and requires both delegated
 session keys to authorize the completed immutable escrow binding once. Later
 move signatures rely on that binding without repeating its fields. See
 [genesis authorization](docs/GENESIS_AUTHORIZATION.md) for the protocol and tested
-limits. The browser supports practice and explicitly loaded, independently verified
-escrow-authorized matches. Production deployment and browser-driven funding remain disabled.
+limits. The browser supports practice, local-chain offer creation/joining, and
+explicitly loaded, independently verified escrow-authorized matches. Production
+deployment and browser-driven settlement remain disabled.
 See [Phase B lifecycle and persistence](docs/PHASE_B.md) for admission and recovery guarantees,
 and [Phase C evidence-to-trace integration](docs/PHASE_C.md) for canonical reconstruction
 and self-contained dispute artifacts. [Phase D](docs/PHASE_D.md) documents neutral
 one-step adjudication and the remaining policy boundary.
 The [protocol-boundary guide](docs/PROTOCOL_BOUNDARY.md) classifies shared
-authorization, current trace adjudication, the removed legacy surface, and
-unresolved settlement work.
+authorization, current trace adjudication and settlement, and the removed
+legacy surface.
 
 ## Deterministic cumulative GameState
 
@@ -275,22 +276,23 @@ payout functions were removed in Issue #9 because their evidence could not
 justify moving funds. See the [current protocol boundary](docs/PROTOCOL_BOUNDARY.md).
 
 The arena accepts exact 1 CFC antes or an owner-approved conventional ERC-20 at
-its configured amount. CFC rewards are reserved before a challenge becomes
-joinable. Fee-on-transfer and rebasing assets are intentionally unsupported.
+its configured amount. A successful settlement mints its deterministic CFC
+gameplay reward; creating a match does not reserve or require existing reward
+tokens. Fee-on-transfer and rebasing assets are intentionally unsupported.
 Allowlisting a token does not provide an oracle, redemption, or stable-value guarantee.
 
 ### Challenge and join
 
 `challenge` requires a fresh matchId, P1 session address, the canonical rulesHash,
 and either CFC or an approved token. It snapshots the asset, ante, one-CFC base
-reward, opponent restriction, and fixed 24-hour response window, reserves the
-reward, and deposits P1's ante.
+reward, opponent restriction, and fixed 24-hour response window, then deposits
+P1's ante.
 
 With the ranked flag, the ante must be CFC and the opponent must be named. The
 ranked module requires equal current streaks, locks P1 to one unsettled ranked
 offer, calculates `F(streak + 1)`, and snapshots the reward and policy version.
 The read-only browser preview plainly reports the 1 CFC risk, both-wallet
-eligibility, streak, next-win reward, reserve sufficiency, and policy version
+eligibility, streak, protocol-minted next-win reward, and policy version
 before the user creates a transaction in an external wallet/tool.
 
 `join` requires Open status, a caller other than P1, the snapshotted ante, and a non-zero P2 session address. If expectedOpponent is non-zero, only that main wallet can join; zero makes it open. Join stores P2/session key (requiring distinct keys), makes the escrow Active but
@@ -302,13 +304,13 @@ after the authorization deadline; their genesis reservations remain permanent.
 ### Cancellation and settlement
 
 Before join only P1 may cancel; after an unactivated join, anyone may trigger the
-deadline refund. Both paths create pull credits and release the reward reservation.
+deadline refund. Both paths create pull credits and mint no gameplay reward.
 Authorization opens a 24-hour game window. A timely trace claim starts a fresh
 24-hour response window; only a valid action that advances the dispute resets it.
 Permissionless deadline calls finalize an unchallenged trace, accept the sole
 midpoint responder, or produce no result when nobody responds. A winner receives
-their own ante plus the reserved CFC reward; the loser ante enters settled treasury.
-Draw and no-result outcomes send both antes to treasury and release the reward.
+their own ante plus the newly minted CFC reward; the loser ante enters settled
+treasury. Draw and no-result outcomes send both antes to treasury and mint no reward.
 
 ### Enforced on-chain versus trusted
 
@@ -490,7 +492,8 @@ npm run test:contract        # deploy to a local EVM; assert lifecycle + trace d
 The harness uses lockfile-pinned `solc` 0.8.26 without compiler downloads and
 stores its configuration/cache in `.cache/hardhat/`. Tests create only valueless,
 in-process EVM contracts, including a negative test with simulated chain ID 1.
-The browser sends no contract transactions, and the old `hh/e2e-onchain.cjs`
+The browser sends local offer-creation and join transactions, but no claim,
+dispute, timeout, or settlement transactions. The old `hh/e2e-onchain.cjs`
 workflow is retired.
 
 `simulate-arena` now exits with a retirement notice: its former JavaScript model
@@ -501,8 +504,8 @@ used a different protocol and must not be treated as contract validation. Use
 
 ~~~text
 contracts/CryptoFighterArena.sol  shared arena admission and trace context
-contracts/CryptoFighterCoin.sol   owner-issued 18-decimal CFC ERC-20
-contracts/CryptoFighterVault.sol  segregated CFC rewards/escrow/credits/treasury
+contracts/CryptoFighterCoin.sol   administrative + gameplay-minted CFC ERC-20
+contracts/CryptoFighterVault.sol  authorized CFC mint/escrow/credits/treasury
 contracts/CryptoFighterTokenEscrow.sol approved ERC-20 escrow/credits/treasury
 contracts/CryptoFighterRanked.sol ranked streak/Fibonacci policy module
 contracts/GameTransitionVerifier.sol independent canonical one-step rules

@@ -14,7 +14,7 @@ contracts:
 
 ```text
 CryptoFighterArena                 main deployed arena and settlement coordinator
-├── uses CryptoFighterVault        CFC reward/ante/credit/treasury accounting
+├── uses CryptoFighterVault        authorized CFC mint/ante/credit/treasury accounting
 ├── uses CryptoFighterTokenEscrow  approved-token ante/credit/treasury accounting
 ├── uses CryptoFighterRanked       streak eligibility/Fibonacci policy
 └── inherits TraceDispute          trace claim, bisection, correction, finalization
@@ -31,23 +31,24 @@ engine separate avoids the EIP-170 runtime-size limit. The helper has no escrow
 or fund-transfer logic.
 
 The local harness uses the optimizer's size-oriented `runs: 1` setting. The
-arena runtime is 24,292 bytes, leaving 284 bytes below EIP-170; future features
+arena runtime is 23,524 bytes, leaving 1,052 bytes below EIP-170; future features
 must continue moving cohesive state/logic into modules instead of growing the arena.
 
 ## Current surfaces
 
 | Surface | Current role |
 | --- | --- |
-| `challenge`, `join`, `cancelOpenChallenge` | Reserve a CFC reward, deposit snapshotted ERC-20 antes, join, or cancel a local challenge. Browser transaction controls do not exist. |
+| `challenge`, `join`, `cancelOpenChallenge` | Deposit snapshotted ERC-20 antes, join, or cancel a local challenge. No reward inventory is reserved. The browser can preview and submit local create/join transactions; cancellation still requires an external tool. |
 | `getGenesisBinding`, `challengeForGenesis`, `authorizeGenesis`, `refundUnactivatedMatch` | Register the completed binding, require both delegated session approvals, and refund both deposits if activation never occurs. |
 | `readGenesisRecord`, `verifyGenesisAuthorization`, `createGenesisSession` | Independently read and verify an activated binding before admitting escrow mode. |
 | `reconstructEvidence`, `buildEvidenceBundle`, `buildAuthorizedExecutionTrace`, `loadEvidenceDefense` | Rebuild evidence and trace artifacts from a supplied durable journal. Every artifact remains settlement-ineligible. |
 | `publishTraceArchive`, `claimTrace`, `challengeTrace`, `revealMidpoint`, `adjudicateStep` | Commit an archive/root, bisect disagreement, recalculate one step, and retain the surviving trace or produce no result. |
 | `finalizeTraceClaim`, `expireTraceTurn`, `expireUnclaimedMatch` | Permissionlessly progress an elapsed claim, dispute turn, or game window into settlement. |
-| CFC/token vault withdrawal functions | Let players pull credits and let the owner withdraw only settled treasury or unreserved rewards. |
+| CFC/token vault withdrawal functions | Let players pull credits and let the owner withdraw only settled treasury. Active escrow and player credits remain protected. |
+| `mintAdministrative`, `mintGameplayReward` | Keep discretionary owner issuance separate from an exactly-once gameplay path restricted to the designated settlement vault. |
 | `proveInvalidInput`, `proveEquivocation` | Record objective signed evidence faults separately from the trace verdict. They have no payout or reputation effect. |
 | `prepareTraceClaim`, `prepareTraceChallenge`, `prepareMidpointOpening`, `prepareAdjudicationWitness` | Build and validate calldata-shaped witnesses. They do not send transactions. |
-| `connectWallet` and the browser's **Escrow evidence** panel | Read and verify an already activated local-chain match. The browser sends no contract transaction. |
+| `connectWallet` and the browser's **Escrow evidence** panel | Read and verify an already activated local-chain match. This evidence panel sends no settlement transaction. |
 | `CryptoFighterRanked` views and offer state | Expose equal-streak eligibility, exact next-win reward, policy version, active lock, and historical result. |
 
 ## Removed legacy surface
@@ -73,7 +74,8 @@ the removed entry points.
 
 The current local path ends in a vault-accounting result:
 
-1. `challenge` reserves a fresh match ID and records Player 1's partial offer.
+1. `challenge` reserves a fresh match ID, records Player 1's partial offer, and
+   escrows the ante without reserving a reward balance.
 2. `join` supplies Player 2 and sets the context to the hash
    of the complete `GenesisBinding`.
 3. Both session keys approve that completed binding through `authorizeGenesis`.
@@ -87,8 +89,9 @@ The current local path ends in a vault-accounting result:
 8. `GameTransitionVerifier` recalculates that transition. A surviving trace gets
    a fresh response window; neither valid transition produces no result.
 9. Once a terminal claim survives its response window, the arena atomically
-   credits the winner's ante and CFC reward, forfeits the loser ante, or applies
-   draw/no-result treasury rules. Players withdraw their own credits later.
+   returns the winner's ante as credit, instructs the vault to mint the exact
+   snapshotted CFC reward into that credit, and forfeits the loser ante. Draw and
+   no-result rules mint nothing. Players withdraw their own credits later.
 
 A practice archive cannot interact with the arena. Practice and escrow READY
 messages use different signed contexts, and the evidence builder rejects giving

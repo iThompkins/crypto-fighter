@@ -6,11 +6,9 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {CryptoFighterCoin} from "./CryptoFighterCoin.sol";
 
-/// @notice Segregated CFC accounting for rewards, escrow, player credits, and
-///         owner-controlled settled treasury funds.
-/// @dev The operator is intended to become the arena. This increment exposes
-///      the accounting interface without enabling settlement in the arena.
+/// @notice Segregated CFC accounting for gameplay credits, escrow, and treasury.
 contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -19,9 +17,7 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
     error InvalidIdentifier();
     error UnauthorizedOperator(address caller);
     error UnauthorizedPendingOperator(address caller);
-    error RewardAlreadyReserved(bytes32 reservationId);
-    error RewardNotReserved(bytes32 reservationId);
-    error InsufficientAvailableRewards(uint256 available, uint256 requested);
+    error GameplayRewardAlreadyCredited(bytes32 matchId);
     error InsufficientEscrow(bytes32 matchId, address player, uint256 available, uint256 requested);
     error InsufficientPlayerCredit(address player, uint256 available, uint256 requested);
     error InsufficientTreasury(uint256 available, uint256 requested);
@@ -29,33 +25,28 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
     error UnexpectedTransferAmount(uint256 expected, uint256 received);
     error OwnershipRenunciationDisabled();
 
-    IERC20 public immutable cfc;
+    CryptoFighterCoin public immutable cfc;
 
     address public operator;
     address public pendingOperator;
 
-    uint256 public availableRewards;
-    uint256 public totalReservedRewards;
     uint256 public totalActiveEscrow;
     uint256 public settledTreasury;
     uint256 public totalPlayerCredits;
+    uint256 public totalGameplayRewardsCredited;
 
-    mapping(bytes32 => uint256) public rewardReservations;
+    mapping(bytes32 => uint256) public gameplayRewards;
     mapping(bytes32 => mapping(address => uint256)) public activeEscrow;
     mapping(address => uint256) public playerCredits;
 
     event OperatorTransferStarted(address indexed currentOperator, address indexed pendingOperator);
     event OperatorTransferred(address indexed previousOperator, address indexed newOperator);
-    event RewardFunded(address indexed funder, uint256 amount);
-    event RewardReserved(bytes32 indexed reservationId, uint256 amount);
-    event RewardReleased(bytes32 indexed reservationId, uint256 amount);
-    event RewardCredited(bytes32 indexed reservationId, address indexed player, uint256 amount);
+    event GameplayRewardCredited(bytes32 indexed matchId, address indexed player, uint256 amount);
     event EscrowDeposited(bytes32 indexed matchId, address indexed player, uint256 amount);
     event EscrowCredited(bytes32 indexed matchId, address indexed player, uint256 amount);
     event EscrowForfeited(bytes32 indexed matchId, address indexed player, uint256 amount);
     event TreasuryDeposited(address indexed depositor, uint256 amount);
     event TreasuryWithdrawn(address indexed recipient, uint256 amount);
-    event AvailableRewardsWithdrawn(address indexed recipient, uint256 amount);
     event PlayerCreditWithdrawn(address indexed player, address indexed recipient, uint256 amount);
     event ExcessRecovered(address indexed recipient, uint256 amount);
 
@@ -64,7 +55,7 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
         _;
     }
 
-    constructor(IERC20 cfcToken, address initialOwner, address initialOperator)
+    constructor(CryptoFighterCoin cfcToken, address initialOwner, address initialOperator)
         Ownable(initialOwner)
     {
         require(block.chainid == 31337, "prototype: local chain only");
@@ -78,11 +69,7 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
     }
 
     function accountedBalance() public view returns (uint256) {
-        return availableRewards
-            + totalReservedRewards
-            + totalActiveEscrow
-            + settledTreasury
-            + totalPlayerCredits;
+        return totalActiveEscrow + settledTreasury + totalPlayerCredits;
     }
 
     function excessBalance() public view returns (uint256) {
@@ -114,40 +101,27 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
         emit OperatorTransferred(previous, msg.sender);
     }
 
-    function fundRewards(uint256 amount) external nonReentrant {
-        _requireAmount(amount);
-        _pullExact(msg.sender, amount);
-        availableRewards += amount;
-        emit RewardFunded(msg.sender, amount);
+    /// @notice Accept the token owner's pending two-step gameplay-authority handoff.
+    function acceptGameplayAuthority() external {
+        cfc.acceptGameplayAuthority();
     }
 
-    function reserveReward(bytes32 reservationId, uint256 amount) external onlyOperator {
-        _requireIdentifier(reservationId);
-        _requireAmount(amount);
-        if (rewardReservations[reservationId] != 0) {
-            revert RewardAlreadyReserved(reservationId);
-        }
-        if (availableRewards < amount) {
-            revert InsufficientAvailableRewards(availableRewards, amount);
-        }
-        availableRewards -= amount;
-        totalReservedRewards += amount;
-        rewardReservations[reservationId] = amount;
-        emit RewardReserved(reservationId, amount);
-    }
-
-    function releaseReward(bytes32 reservationId) external onlyOperator returns (uint256 amount) {
-        amount = _takeReservation(reservationId);
-        availableRewards += amount;
-        emit RewardReleased(reservationId, amount);
-    }
-
-    function creditReward(bytes32 reservationId, address player) external onlyOperator returns (uint256 amount) {
+    /// @notice Mint and credit the arena-derived reward as one atomic operation.
+    function mintGameplayReward(bytes32 matchId, address player, uint256 amount)
+        external
+        onlyOperator
+        nonReentrant
+    {
+        _requireIdentifier(matchId);
         _requireAddress(player);
-        amount = _takeReservation(reservationId);
+        _requireAmount(amount);
+        if (gameplayRewards[matchId] != 0) revert GameplayRewardAlreadyCredited(matchId);
+        gameplayRewards[matchId] = amount;
+        totalGameplayRewardsCredited += amount;
+        cfc.mintGameplayReward(matchId, player, amount);
         playerCredits[player] += amount;
         totalPlayerCredits += amount;
-        emit RewardCredited(reservationId, player, amount);
+        emit GameplayRewardCredited(matchId, player, amount);
     }
 
     function depositEscrow(bytes32 matchId, address player, uint256 amount)
@@ -193,7 +167,7 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
         }
         playerCredits[msg.sender] = available - amount;
         totalPlayerCredits -= amount;
-        cfc.safeTransfer(recipient, amount);
+        IERC20(address(cfc)).safeTransfer(recipient, amount);
         emit PlayerCreditWithdrawn(msg.sender, recipient, amount);
     }
 
@@ -204,19 +178,8 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
             revert InsufficientTreasury(settledTreasury, amount);
         }
         settledTreasury -= amount;
-        cfc.safeTransfer(recipient, amount);
+        IERC20(address(cfc)).safeTransfer(recipient, amount);
         emit TreasuryWithdrawn(recipient, amount);
-    }
-
-    function withdrawAvailableRewards(address recipient, uint256 amount) external onlyOwner nonReentrant {
-        _requireAddress(recipient);
-        _requireAmount(amount);
-        if (availableRewards < amount) {
-            revert InsufficientAvailableRewards(availableRewards, amount);
-        }
-        availableRewards -= amount;
-        cfc.safeTransfer(recipient, amount);
-        emit AvailableRewardsWithdrawn(recipient, amount);
     }
 
     function recoverExcess(address recipient, uint256 amount) external onlyOwner nonReentrant {
@@ -224,7 +187,7 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
         _requireAmount(amount);
         uint256 available = excessBalance();
         if (available < amount) revert InsufficientExcess(available, amount);
-        cfc.safeTransfer(recipient, amount);
+        IERC20(address(cfc)).safeTransfer(recipient, amount);
         emit ExcessRecovered(recipient, amount);
     }
 
@@ -232,13 +195,6 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
     ///      Transfer ownership to a DAO/timelock instead.
     function renounceOwnership() public view override onlyOwner {
         revert OwnershipRenunciationDisabled();
-    }
-
-    function _takeReservation(bytes32 reservationId) private returns (uint256 amount) {
-        amount = rewardReservations[reservationId];
-        if (amount == 0) revert RewardNotReserved(reservationId);
-        delete rewardReservations[reservationId];
-        totalReservedRewards -= amount;
     }
 
     function _takeEscrow(bytes32 matchId, address player, uint256 amount) private {
@@ -255,7 +211,7 @@ contract CryptoFighterVault is Ownable2Step, ReentrancyGuard {
 
     function _pullExact(address from, uint256 amount) private {
         uint256 beforeBalance = cfc.balanceOf(address(this));
-        cfc.safeTransferFrom(from, address(this), amount);
+        IERC20(address(cfc)).safeTransferFrom(from, address(this), amount);
         uint256 received = cfc.balanceOf(address(this)) - beforeBalance;
         if (received != amount) revert UnexpectedTransferAmount(amount, received);
     }

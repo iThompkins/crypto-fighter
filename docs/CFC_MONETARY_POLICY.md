@@ -1,117 +1,51 @@
-# CFC monetary policy and ranked Fibonacci rewards
+# CFC monetary policy and protocol-minted gameplay rewards
 
-This document specifies the product and accounting policy approved in Issue
-#12. `CryptoFighterCoin` and the segregated CFC vault implement the issuance,
-reserve, escrow, credit, treasury, withdrawal, and owner-handoff primitives.
-The local arena now connects those primitives to approved-token settlement and
-same-streak ranked Fibonacci rewards. Public-chain deployment remains future work.
+This document specifies the launch policy implemented by the local-only Crypto
+Fighter contracts. CFC is intentionally inflationary and has no fixed supply
+cap. Successful, legitimately settled games mint their deterministic rewards at
+settlement. Forfeited antes belong to treasury accounting; they do not fund or
+limit gameplay rewards.
 
-## Launch policy in plain language
+Practice games remain contract-free. They use no asset, mint nothing, and cannot
+change ranked streaks.
 
-- Crypto Fighter Coin (`CFC`) is an 18-decimal ERC-20 game token.
-- The initial owner controls issuance, reward funding, treasury withdrawals, and
-  policy versions. Those powers can later transfer to a DAO/timelock.
-- CFC has no fixed maximum supply. New issuance happens in explicit owner-approved
-  batches, never automatically because somebody reports a win.
-- Ranked play requires exactly 1 CFC from each player.
-- Ranked opponents must have the same current win streak when the offer is
-  created and when it is joined.
-- A ranked winner gets their own 1 CFC ante back plus the next Fibonacci reward.
-  The loser ante becomes treasury funds and the loser streak resets to zero.
-- A verified draw sends both antes to treasury, pays no reward, and preserves
-  both streaks.
-- A funded match that ends with no established result pays no reward, sends both
-  antes to treasury, and resets both streaks.
-- Approved stablecoin matches are unranked. Their winner receives their own ante
-  back plus a flat 1 CFC reward; they never advance or reset a ranked streak.
-- The full promised reward is reserved before a match offer becomes joinable.
-  If the vault cannot reserve it, the match cannot start.
-- Stablecoin acceptance does not redeem CFC for one dollar and does not promise
-  a dollar floor or peg.
+## Two separate issuance authorities
 
-Practice games remain off-contract, use no asset, and cannot affect streaks or
-rewards.
+CFC exposes two independently reviewable issuance paths:
 
-## Token and authority model
+1. **Administrative issuance.** The two-step token owner may call
+   `mintAdministrative` for disclosed distribution, investor, partnership,
+   liquidity, or other governance-approved allocations. These mints increment
+   `totalAdministrativeMinted` and emit `AdministrativeMinted`.
+2. **Gameplay issuance.** Only the current gameplay authority may call
+   `mintGameplayReward`. At launch that authority is the CFC credit vault, and
+   only the arena operator may tell the vault to mint. These mints increment
+   `totalGameplayMinted`, mark one match ID as issued, and emit both
+   `GameplayRewardMinted` and `GameplayRewardCredited`.
 
-The launch token is a conventional fungible ERC-20 named **Crypto Fighter Coin**
-with symbol **CFC** and 18 decimals. “Game token” is the accurate term when CFC
-runs on another chain; it is not that chain's native gas coin.
+The token owner cannot use the gameplay function after authority is handed to
+the vault. Gameplay-authority changes and vault-operator changes are separate
+two-step transitions. Governance can rotate those authorities, but cannot make
+an existing settlement accept an arbitrary caller, recipient, or amount.
 
-There is no immutable supply cap in this policy. The Fibonacci rule is intended
-to be conceptually uncapped, and future community monetary policy may fund new
-competition. Instead of silently minting at settlement, the token owner mints
-visible batches. A batch can fund the reward vault, seed an explicitly disclosed
-distribution, or implement another published owner decision. ERC-20 `Transfer`
-events from the zero address expose every issuance.
+## Ranked matches
 
-Initially, the owner is the project operator. The owner may:
+- Each ranked player escrows exactly 1 CFC.
+- A ranked offer names a distinct opponent.
+- Both players must have the same qualifying streak when the offer is prepared
+  and remain eligible when it is joined.
+- A player cannot pledge one streak into multiple unsettled ranked offers.
+- The starting streak, reward, and policy version are immutable match terms.
+- The winner receives their own 1 CFC ante as a player credit plus a newly
+  minted Fibonacci reward.
+- The loser ante becomes settled CFC treasury and the loser streak resets.
+- A draw forfeits both antes to treasury but preserves both streaks.
+- No established result forfeits both antes and resets both streaks.
 
-- mint disclosed CFC batches;
-- fund or withdraw only the unreserved part of the reward vault;
-- withdraw settled treasury balances;
-- approve conventional stablecoin assets and future-match ante amounts;
-- publish a new policy version for future offers;
-- pause creation/join of new funded matches in an emergency; and
-- begin a two-step transfer of each privileged contract to a new owner.
+For equal starting streak `s`, the newly minted reward is `F(s + 1)` CFC using
+the positive Fibonacci sequence:
 
-The owner may not:
-
-- alter a funded offer or active match;
-- reduce or withdraw a reserved reward;
-- take active escrow or player credits;
-- rewrite a streak or settled result;
-- make a policy version retroactive; or
-- block player withdrawals or deterministic settlement of already-funded matches.
-
-A future DAO/timelock receives the same bounded contract roles through ordinary
-two-step ownership transfer. DAO membership and voting weights are deliberately
-not encoded as token rights today. The later community may choose CFC voting,
-earned reputation, membership shares, or a hybrid without redeploying the arena
-or moving player balances.
-
-## Ranked eligibility
-
-A player has one nonnegative `rankedStreak`, initially zero. A ranked match is
-eligible only when all of these are true:
-
-1. both antes are exactly `1 CFC`;
-2. the main wallets are different;
-3. both snapshotted streaks are equal;
-4. neither player already has another unsettled ranked match; and
-5. the full next-win reward is successfully reserved.
-
-The single-active-ranked-match rule prevents one streak value from being pledged
-into several simultaneous advancement attempts. Exact streak equality creates
-the intended tournament thinning: a streak-8 player cannot advance by defeating
-a streak-0 account. Matchmaking reputation or a future rating may help players
-find opponents, but it cannot override on-chain streak eligibility.
-
-The offer snapshots both streaks and its reward. If either player's streak
-changes before join, the offer is stale and cannot be joined; its creator must
-cancel or replace it. Once joined, later policy changes cannot change eligibility
-or reward.
-
-Repeated opponents are not separately prohibited. After a decisive match their
-streaks differ, so they cannot immediately rematch for advancement. Cooperating
-wallets can still build a pool of eligible accounts, but doing so requires an
-exponentially larger pool, 1 CFC at risk per match, and the published settlement
-time. General identity or Sybil prevention is outside this policy.
-
-## Exact Fibonacci rule
-
-Use the standard positive Fibonacci sequence:
-
-```text
-F(1) = 1
-F(2) = 1
-F(n) = F(n - 1) + F(n - 2)
-```
-
-For a match whose players both begin at streak `s`, the next-win reward is
-`F(s + 1)` CFC. The winner's new streak is `s + 1`; the loser resets to zero.
-
-| Starting streak | Next-win reward | Winner's new streak |
+| Starting streak | Minted reward | Winner streak |
 | ---: | ---: | ---: |
 | 0 | 1 CFC | 1 |
 | 1 | 1 CFC | 2 |
@@ -120,198 +54,132 @@ For a match whose players both begin at streak `s`, the next-win reward is
 | 4 | 5 CFC | 5 |
 | 5 | 8 CFC | 6 |
 | 6 | 13 CFC | 7 |
-| 7 | 21 CFC | 8 |
-| 8 | 34 CFC | 9 |
-| 9 | 55 CFC | 10 |
-| 10 | 89 CFC | 11 |
 
-The duplicate opening `1, 1` is intentional standard Fibonacci indexing. It
-keeps the first two ranked rewards at the base amount before growth accelerates.
+The duplicate opening `1, 1` is intentional. There is no policy streak cap, but
+the implementation uses checked `uint256` arithmetic. An offer whose Fibonacci
+reward cannot be represented reverts at creation. It never wraps, truncates, or
+substitutes a smaller reward.
 
-There is no policy-level streak cap. The implementation must use checked integer
-arithmetic. If the next reward cannot be represented or fully reserved, no offer
-at that streak can be created. It must not wrap, truncate, substitute a smaller
-reward, or reset a streak merely because funding is unavailable.
+## Unranked approved-token matches
 
-## Terminal streak consequences
+Unranked CFC and owner-approved conventional ERC-20 matches never read or write
+ranked streaks. A decisive accepted result mints a flat 1 CFC reward into the
+winner's CFC player credit.
 
-Streak state changes only once, as part of terminal economic settlement:
+The winner's own ante is separately returned in its original token. The loser
+ante enters that token's settled treasury. Approved stablecoins are ante assets,
+not a CFC redemption promise, price floor, or exchange-rate guarantee.
 
-| Terminal result | Player 1 streak | Player 2 streak | Reward |
-| --- | --- | --- | --- |
-| Player 1 wins | Increment from snapshotted equal streak | Reset to 0 | Reserved Fibonacci reward to Player 1 |
-| Player 2 wins | Reset to 0 | Increment from snapshotted equal streak | Reserved Fibonacci reward to Player 2 |
-| Verified draw | Preserve | Preserve | Return reward reservation; both antes go to treasury |
-| No established result | Reset to 0 | Reset to 0 | Return reservation to vault |
-| Offer cancelled before join | Unchanged | Unchanged | Return reservation to vault |
-| Joined match never authorized | Unchanged | Unchanged | Return reservation to vault |
+## When gameplay issuance occurs
 
-Resetting both players after no established result prevents a player from
-preserving a valuable streak by withholding the evidence needed to decide a
-match. A verified draw preserves both streaks because the protocol established
-a real game outcome, but its two antes still become treasury funds.
+Gameplay issuance happens only inside the arena's exactly-once terminal
+settlement operation after an accepted terminal result identifies P1 or P2 as
+the winner. A claim, unverified trace, midpoint opening, isolated transition
+verdict, or provisional dispute state cannot mint.
 
-Stablecoin and other unranked matches never read or write `rankedStreak`, even if
-their winner receives the flat base CFC reward.
+| Outcome | Ante accounting | Streak accounting | Gameplay mint |
+| --- | --- | --- | ---: |
+| P1 wins | P1 ante to P1 credit; P2 ante to treasury | Ranked P1 +1; P2 to 0 | Snapshotted reward to P1 credit |
+| P2 wins | P1 ante to treasury; P2 ante to P2 credit | Ranked P1 to 0; P2 +1 | Snapshotted reward to P2 credit |
+| Verified draw | Both antes to treasury | Preserve ranked streaks | 0 |
+| No established result | Both antes to treasury | Reset ranked streaks | 0 |
+| Open offer cancelled | Deposited ante returned | No streak change | 0 |
+| Joined match never activated | Both antes returned | No streak change | 0 |
+| Failed genesis activation | Both antes returned | No streak change | 0 |
 
-Because a stablecoin match contributes no forfeited CFC ante, its 1 CFC reward
-is a pure draw on the prefunded reward budget. Owner/DAO reporting must count
-ranked and stablecoin-match reward obligations separately.
+The vault mints CFC to itself and credits the accepted winner in the same call.
+If minting fails, the EVM reverts the entire settlement transaction, including
+terminal state, ranked updates, escrow movement, treasury movement, and credits.
 
-## Reward reservation and exhaustion
+## Exactly-once and authorization boundaries
 
-The reward vault holds actual CFC. A ranked offer atomically reserves its exact
-Fibonacci reward when created. A stablecoin offer similarly reserves its flat
-1 CFC reward. Reserved CFC is unavailable to the owner, treasury, and every
-other offer.
+The following layers all reject replay or unauthorized issuance:
 
-At terminal settlement, exactly one of these happens:
+- the arena settles only an active challenge and marks it terminal once;
+- the immutable match ID selects the reward record;
+- the vault accepts reward instructions only from its arena operator;
+- the vault credits each match ID at most once;
+- the token accepts gameplay minting only from its gameplay authority; and
+- the token marks each match ID as issued at most once.
 
-- decisive result: credit the reserved reward to the accepted winner;
-- draw or no established result: release it to the vault's available balance;
-- cancellation/unactivated refund: release it without changing either streak.
+The arena supplies the stored winner and stored reward amount. Peers, callers,
+the token owner, and permissionless timeout executors cannot supply a reward
+recipient or amount. Permissionless callers merely advance an already-defined
+settlement path.
 
-If available vault CFC is less than the promised reward, offer creation reverts.
-The owner may mint/fund another disclosed batch and try again. Existing funded
-matches never depend on a later mint and never receive a reduced payout.
+## Accounting and public observability
 
-This design separates monetary policy from adjudication: a game result can spend
-only CFC that already exists and was reserved for it.
+The following values are directly readable:
 
-## Aggregate reward mathematics
+- `totalSupply`: all minted CFC not burned;
+- `totalAdministrativeMinted`: cumulative discretionary issuance;
+- `totalGameplayMinted`: cumulative protocol gameplay issuance;
+- `totalGameplayRewardsCredited`: cumulative gameplay rewards placed in pull credits;
+- `totalPlayerCredits`: CFC currently withdrawable by players;
+- `totalActiveEscrow`: CFC currently committed as active antes; and
+- `settledTreasury`: forfeited CFC available only to treasury governance.
 
-Assume fair outcomes, exact same-streak matching, no draws, and a cohort large
-enough to keep pairing winners. At win level `n`:
+`totalSupply` increases when either issuance path mints. Moving an ante to
+treasury, crediting an ante back to a player, or withdrawing an existing credit
+does not change supply. Direct unsolicited transfers to the vault are excess;
+they do not become gameplay rewards or escrow automatically.
 
-- only `1 / 2^n` of the starting players win at that level; and
-- each winner receives `F(n)` CFC.
+## Accounting examples
 
-Expected gross rewards per starting player are therefore:
+### Ranked starting streak 2
 
-```text
-F(1)/2 + F(2)/4 + F(3)/8 + ... = 2 CFC
-```
+Both players escrow 1 CFC. The accepted winner receives a 1 CFC ante credit and
+a newly minted 2 CFC reward credit, for 3 CFC of total credit. The loser's 1 CFC
+ante enters treasury. Total supply rises by exactly 2 CFC.
 
-Each decisive match also eliminates one player from the advancing cohort and
-moves that player's 1 CFC ante to treasury. The expected forfeited ante approaches
-1 CFC per starting player.
+Under the former prefunded model the same reward moved 2 existing CFC from a
+reward reserve and supply did not change. That reserve no longer exists.
 
-An eight-player example stops after three levels:
+### Approved-token match
 
-| Level | Winners | Reward each | CFC rewards | Loser antes to treasury |
-| ---: | ---: | ---: | ---: | ---: |
-| 1 | 4 | 1 | 4 | 4 |
-| 2 | 2 | 1 | 2 | 2 |
-| 3 | 1 | 2 | 2 | 1 |
-| **Total** |  |  | **8** | **7** |
+Both players escrow the configured approved token amount. On a decisive result,
+the winner receives their approved-token ante credit, the loser ante enters that
+token's treasury, and the winner receives a newly minted 1 CFC credit. CFC total
+supply rises by exactly 1 CFC.
 
-The individual reward is uncapped in policy, but the probability/population able
-to reach it shrinks faster than Fibonacci grows. This keeps expected aggregate
-reward finite under the exact-tier assumptions. It does not guarantee a market
-price or prevent every form of coordinated play.
+### Draw or no result
 
-## Supply and circulation accounting
+Both antes enter treasury under the existing settlement rules. No CFC reward is
+minted and CFC total supply is unchanged. Ranked draws preserve streaks; ranked
+no-result outcomes reset them.
 
-The following terms are different:
+## Aggregate economics
 
-- **Total supply:** every minted CFC that has not been burned, including CFC in
-  the reward vault and treasury.
-- **Available reward balance:** vault CFC not reserved for a funded offer.
-- **Reserved rewards:** vault CFC promised to active offers/matches.
-- **Treasury balance:** forfeited CFC the owner/DAO may later withdraw.
-- **Circulating outside protocol contracts:** CFC held by players, contributors,
-  markets, and other external accounts.
-- **Burned:** CFC permanently destroyed, reducing total supply.
+For intuition, assume fair decisive ranked outcomes, exact same-streak matching,
+and a sufficiently large cohort. At level `n`, half as many players remain while
+the individual reward follows Fibonacci growth. The infinite expected gross
+gameplay issuance approaches 2 CFC per starting entrant. Expected forfeited ante
+accrual approaches 1 CFC per starting entrant.
 
-Moving a loser ante into treasury does not burn it. While retained, it reduces
-external circulation; withdrawal and spending can return it to circulation.
-Paying rewards from a previously minted vault also does not mint at settlement.
-Only an explicit owner/DAO mint increases total supply.
+Those are different accounting facts. Gameplay issuance increases total supply;
+treasury accrual moves already-existing CFC out of player circulation. If
+treasury later withdraws and spends its CFC, that existing supply can circulate
+again. A future DAO may change policies through a new explicit policy version,
+but forfeited antes are not an automatic reward backing mechanism.
 
-For intuition, if reward-vault issuance tracks the ideal cohort calculation,
-gross reward funding approaches 2 CFC and treasury accrual approaches 1 CFC per
-starting ranked entrant. With treasury CFC retained, external circulation rises
-by roughly the difference. If the treasury later spends its CFC, more of the
-already-existing supply becomes active. If the treasury recycles CFC into the
-reward vault, future minting needs fall. If it burns CFC, total supply falls.
+## Governance and market limits
 
-The owner/DAO should report minting, reward-vault, treasury, burn, and circulation
-figures separately rather than calling treasury custody “deflation.”
+Launch governance is owner-controlled and designed for later transfer to a
+DAO/timelock through two-step authority handoffs. Governance may administer
+discretionary issuance, treasury use, approved ante tokens, creation pause, and
+future policy versions. It cannot rewrite settled results or withdraw active
+escrow and player credits through the provided accounting functions.
 
-## Stablecoins and price
+CFC utility and ranked reward prospects may affect demand, while gameplay and
+administrative issuance increase supply. This protocol makes no promise about
+market value, a one-dollar floor, stablecoin convertibility, redemption, or
+investment return.
 
-An approved stablecoin is another ERC-20 ante asset, not a one-for-one redemption
-claim on CFC. Allowing a match to use either 1 CFC or a configured stablecoin
-amount can create gameplay demand for whichever option players prefer, but it
-does not establish a hard CFC floor.
+## Out of scope
 
-A real one-dollar floor would require reliable `1 CFC -> 1 USD stablecoin`
-redemption backed by adequate reserves. This policy provides no redemption,
-automatic market making, price oracle, or peg.
-
-Ranked Fibonacci eligibility gives CFC additional utility and may increase demand.
-Winner sales and newly issued reward funding add supply. Market price remains an
-external result of those forces and is never promised by the game.
-
-Launch policy keeps ranked streaks CFC-only. Automatically switching the streak
-asset according to a spot CFC/stablecoin price is deferred because a young,
-thin market is easy to move and an abrupt threshold would change incentives.
-A future owner/DAO may propose a season-boundary policy using a sustained,
-reviewed price source. It must affect only new offers and cannot rewrite existing
-streaks or rewards.
-
-## Policy versions and eventual DAO control
-
-Every funded offer stores a policy version. The owner can publish a new version,
-but cannot mutate an existing version's meaning for already-created offers.
-At minimum, a version identifies:
-
-- CFC and approved ante-token addresses;
-- stablecoin ante amounts and flat reward;
-- ranked ante amount (fixed at 1 CFC in this policy);
-- Fibonacci rule identifier;
-- ranked eligibility and terminal streak rules; and
-- the settlement-policy identifier used by the arena.
-
-The initial owner can operate these contracts directly. Later, ownership can be
-transferred to a DAO/timelock without migrating token balances, streaks, active
-matches, or vault accounting. The DAO may vote on future issuance, reward-vault
-funding, treasury improvements, approved stablecoins, or future policy versions.
-
-DAO membership remains a later constitutional choice. A reasonable direction is
-hybrid governance: CFC holders govern treasury/emissions while earned fighter or
-contributor membership also approves major gameplay/protocol changes. CFC does
-not promise voting rights until that separate governance policy is approved.
-
-## Required implementation invariants
-
-1. Only the current owner can mint, and every mint is visible through standard
-   token events.
-2. A match can reserve only available vault CFC; one unit cannot back two matches.
-3. Owner withdrawals cannot include active escrow, reserved rewards, or player
-   credits.
-4. Ranked eligibility uses snapshotted equal streaks and exactly 1 CFC per player.
-5. Each terminal match changes rewards, treasury, and streaks exactly once.
-6. Stablecoin/unranked matches never change ranked streaks.
-7. A policy change affects only offers created under the new version.
-8. Pausing new activity cannot block player withdrawal or deterministic exit of
-   already-funded states.
-9. Ownership transfer requires explicit acceptance and can target a future DAO
-   or timelock contract.
-10. Arithmetic overflow or insufficient reward funding rejects offer creation;
-    it never changes the promised sequence.
-
-## Decisions required before production, not before implementation
-
-- Initial CFC mint amount and its disclosed allocation among the reward vault,
-  distribution, liquidity, and owner-controlled treasury.
-- Initial approved stablecoin addresses and per-network ante amounts.
-- Production network and contract addresses.
-- DAO membership, proposal threshold, quorum, voting weight, and timelock delay.
-- Whether a later policy recycles, spends, or burns portions of settled CFC
-  treasury funds.
-- Whether a later season introduces an oracle-informed stablecoin ranked mode.
-
-These choices can be deployment parameters or later policy versions. They do not
-change the launch reward sequence, exact ranked ante, eligibility, reserve rule,
-or owner-to-DAO handoff architecture specified here.
+- Initial issuance quantity and allocation recipients.
+- Investor or partnership agreements.
+- Token-sale contracts, price oracles, redemption, or automatic exchange rates.
+- Production-chain deployment or migration; contracts remain restricted to
+  local chain ID 31337.
+- General identity, anti-Sybil, or reputation systems.

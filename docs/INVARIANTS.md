@@ -174,9 +174,10 @@ the length of the match.
 
 ## INV-13 — Local settlement does not authorize real-fund deployment
 
-**Rule:** The browser sends no contract transactions and deployment remains
-limited to the in-process Hardhat chain. Trace outcomes affect only the new
-local vault-accounting state machine; the older payout functions remain removed.
+**Rule:** The browser may create and join funded offers only on the in-process
+Hardhat chain. It sends no claim, dispute, timeout, withdrawal, or settlement
+transaction. Trace outcomes affect only the local vault-accounting state
+machine; the older payout functions remain removed.
 
 **Why it matters:** Tested local settlement is not an audit, availability system,
 public-chain deployment plan, or authorization to use real assets.
@@ -229,3 +230,21 @@ players can choose the assurance level appropriate for them.
 [`src/genesis.ts`](../src/genesis.ts). The current client pins one provider read;
 production confirmation defaults and reorg recovery remain unimplemented, so
 deployment remains local-only.
+
+## INV-16 — Gameplay issuance follows accepted settlement exactly once
+
+**Rule:** Only the designated gameplay authority may mint a match reward. The
+arena derives the winner and amount from immutable match terms, and the token
+and vault reject a second issuance for the same match ID. A draw, no result,
+cancellation, failed activation, claim, or provisional dispute state mints zero.
+
+**Why it matters:** CFC is intentionally inflationary, but that does not make
+issuance discretionary. Reward minting, ante accounting, streak updates, and
+terminal settlement must either all succeed or all revert.
+
+**Where it is enforced/tested:**
+[`contracts/CryptoFighterCoin.sol`](../contracts/CryptoFighterCoin.sol),
+[`contracts/CryptoFighterVault.sol`](../contracts/CryptoFighterVault.sol),
+[`contracts/CryptoFighterArena.sol`](../contracts/CryptoFighterArena.sol),
+[`hh/test/settlement.cjs`](../hh/test/settlement.cjs), and
+[`hh/test/ranked-streaks.cjs`](../hh/test/ranked-streaks.cjs).
