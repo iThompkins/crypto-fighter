@@ -93,10 +93,15 @@ should be paid.
 
 ### 5. Durable evidence keeps the match reconstructable
 
-Durable evidence means public match information that has finished being written
-to the browser's IndexedDB database. The browser saves its own signed message
+Durable evidence means public match information whose IndexedDB transaction has
+completed. The browser saves its own signed message
 before sending it. It saves an incoming message before using or acknowledging
 it. If that write fails, play stops.
+
+The browser may defer the physical disk flush so live play can keep pace. A
+sudden device or operating-system failure can therefore lose the newest rows;
+that becomes missing evidence, not permission to recreate inputs or claim that
+the lost frames ran.
 
 The saved journal contains the match description, both READY messages, signed
 input packets, and a small number of connection observations. It does not

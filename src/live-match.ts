@@ -130,9 +130,8 @@ export class LiveMatch {
   private validPackets() {
     return new Map(this.collector.validatedPackets().map(p => [`${p.player}:${p.frame}`, p]));
   }
-  private advanceAvailable(all = false) {
+  private advanceAvailable(all = false, valid = this.validPackets()) {
     if (this.stopped || this.ready.size !== 2) return;
-    const valid = this.validPackets();
     do {
       const frame = this.state.frame + 1;
       const p1 = valid.get(`1:${frame}`), p2 = valid.get(`2:${frame}`);
@@ -207,7 +206,7 @@ export class LiveMatch {
         await this.admit(message, true, generation); this.check(generation);
         valid.set(`${this.slot}:${frame}`, packet); result.push(message); frame++;
       }
-      this.advanceAvailable();
+      this.advanceAvailable(false, valid);
       return result;
     });
   }
@@ -229,4 +228,17 @@ export class LiveMatch {
   }
   snapshot() { return structuredClone({ status: this.status, haltReason: this.stopped ?? null, config: this.config, context: this.context, state: this.state, frames: this.frames, frameHead: this.frameHead,
     packets: [...this.committed.values()], evidence: this.collector.export(), history: this.history, settlementEligible: false }); }
+  uiSnapshot() {
+    const packets = [...this.committed.values()];
+    return structuredClone({
+      status: this.status,
+      mode: this.configValue.mode,
+      state: this.state,
+      frames: this.frames.slice(-8),
+      frameCount: this.frames.length,
+      frameHead: this.frameHead,
+      packets: packets.slice(-16),
+      packetCount: packets.length,
+    });
+  }
 }

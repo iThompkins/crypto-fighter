@@ -23,6 +23,7 @@ export function createPacketEvidence(matchId: string, p1Session: string, p2Sessi
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(fn: () => Promise<T>): Promise<T> => { const next = queue.then(fn); queue = next.catch(() => {}); return next; };
   const packets = new Map<string, SignedInputPacket[]>();
+  const participantKeys = new Map<1 | 2, string>();
   const observations: { kind: "disconnect" | "stall" | "reconnect"; localTime: number; frame: number }[] = [];
   const key = (player: number, frame: number) => `${player}:${frame}`;
   return {
@@ -40,9 +41,12 @@ export function createPacketEvidence(matchId: string, p1Session: string, p2Sessi
         if (p.matchId !== matchId.toLowerCase()) return { kind: "unattributed-rejection", reason: "wrong genesis" };
         const expected = p.player === 1 ? p1Session : p2Session;
         try {
-          if (addressFromPublicKey(p.publicKey).toLowerCase() !== expected.toLowerCase() || !await verifyPacket(p)) {
+          const pinnedKey = participantKeys.get(p.player);
+          if ((pinnedKey ? p.publicKey !== pinnedKey : addressFromPublicKey(p.publicKey).toLowerCase() !== expected.toLowerCase()) ||
+              !await verifyPacket(p, expected)) {
             return { kind: "unattributed-rejection", reason: "invalid authentication" };
           }
+          participantKeys.set(p.player, p.publicKey);
         } catch { return { kind: "unattributed-rejection", reason: "invalid authentication" }; }
         const id = key(p.player, p.frame);
         const previous = packets.get(id) ?? [];

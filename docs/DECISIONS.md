@@ -104,3 +104,17 @@ mark the old one `Superseded`; do not erase the history.
   economic effect is implemented.
 - **Context:** [protocol boundary](PROTOCOL_BOUNDARY.md#removed-legacy-surface),
   [Issue #9](https://github.com/iThompkins/crypto-fighter/issues/9)
+
+## D-009 — Gate packets on IndexedDB completion without per-packet disk flushes
+
+- **Date:** 2026-11-05
+- **Status:** Accepted
+- **Decision:** Keep commit-before-send/use ordering, but use independent
+  per-player journals and relaxed IndexedDB durability instead of forcing a
+  physical disk flush for every 30 Hz input packet.
+- **Consequence:** Live matches remain responsive and ordinary reload/crash
+  recovery remains available. A sudden OS or power loss may drop the newest
+  completed rows; that is treated as unavailable evidence and never reconstructed
+  as signed gameplay.
+- **Context:** [PHASE_B.md](PHASE_B.md#persistence-model),
+  [Issue #26](https://github.com/iThompkins/crypto-fighter/issues/26)

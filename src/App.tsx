@@ -52,6 +52,8 @@ export default function App() {
 
   const [packets, setPackets] = useState<SignedInputPacket[]>([]);
   const [canonicalFrames, setCanonicalFrames] = useState<CanonicalFrame[]>([]);
+  const [packetCount, setPacketCount] = useState(0);
+  const [canonicalFrameCount, setCanonicalFrameCount] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [lastError, setLastError] = useState("");
   const [finalStateHash, setFinalStateHash] = useState("");
@@ -102,15 +104,26 @@ export default function App() {
   const [liveStatus, setLiveStatus] = useState("practice discovery");
   const [savedContexts, setSavedContexts] = useState<string[]>([]);
   const retryRef = useRef(0);
+  const uiSyncRef = useRef<number | null>(null);
+  const uiSyncLiveRef = useRef<LiveMatch | null>(null);
   function evidenceStore() { return storeRef.current ??= new BrowserEvidenceStore(); }
   const syncLive = useCallback((live: LiveMatch) => {
     if (liveRef.current !== live) return;
-    const snapshot = live.snapshot();
-    setLiveStatus(`${snapshot.config.mode}: ${snapshot.status}`);
-    stateRef.current = snapshot.state; setState(snapshot.state);
-    setPackets(snapshot.packets); setCanonicalFrames(snapshot.frames);
-    frameHeadRef.current = snapshot.frameHead; setFinalFrameHash(snapshot.frameHead);
-    setIsRunning(snapshot.status === "running");
+    uiSyncLiveRef.current = live;
+    if (uiSyncRef.current !== null) return;
+    uiSyncRef.current = window.requestAnimationFrame(() => {
+      uiSyncRef.current = null;
+      const pending = uiSyncLiveRef.current;
+      uiSyncLiveRef.current = null;
+      if (!pending || liveRef.current !== pending) return;
+      const snapshot = pending.uiSnapshot();
+      setLiveStatus(`${snapshot.mode}: ${snapshot.status}`);
+      stateRef.current = snapshot.state; setState(snapshot.state);
+      setPackets(snapshot.packets); setCanonicalFrames(snapshot.frames);
+      setPacketCount(snapshot.packetCount); setCanonicalFrameCount(snapshot.frameCount);
+      frameHeadRef.current = snapshot.frameHead; setFinalFrameHash(snapshot.frameHead);
+      setIsRunning(snapshot.status === "running");
+    });
   }, []);
 
   useEffect(() => { void evidenceStore().contexts().then(setSavedContexts).catch(e => setLastError(String(e))); }, []);
@@ -161,6 +174,8 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (intervalRef.current) window.clearInterval(intervalRef.current);
+      if (uiSyncRef.current !== null) window.cancelAnimationFrame(uiSyncRef.current);
+      uiSyncLiveRef.current = null;
       // This is a generation counter, not a DOM ref; invalidate current work on cleanup.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       generationRef.current++;
@@ -404,13 +419,21 @@ export default function App() {
       return;
     }
 
-    intervalRef.current = window.setInterval(() => {
-      void tick();
-    }, 1000 / FPS);
+    let cancelled = false;
+    let deadline = performance.now() + 1000 / FPS;
+    const run = async () => {
+      await tick();
+      if (cancelled) return;
+      deadline += 1000 / FPS;
+      const delay = Math.max(0, deadline - performance.now());
+      intervalRef.current = window.setTimeout(() => void run(), delay);
+    };
+    intervalRef.current = window.setTimeout(() => void run(), 1000 / FPS);
 
     return () => {
+      cancelled = true;
       if (intervalRef.current) {
-        window.clearInterval(intervalRef.current);
+        window.clearTimeout(intervalRef.current);
         intervalRef.current = null;
       }
     };
@@ -489,7 +512,7 @@ export default function App() {
     if (generation !== generationRef.current) return;
     updateWallet(newWallet); updateMatchId(makeMatchId());
     stateRef.current = initialState(); setState(stateRef.current);
-    setPackets([]); setCanonicalFrames([]); setFinalFrameHash(ZERO32); setFinalStateHash("");
+    setPackets([]); setCanonicalFrames([]); setPacketCount(0); setCanonicalFrameCount(0); setFinalFrameHash(ZERO32); setFinalStateHash("");
     setRemoteWalletAddress(""); updateRemoteWalletPubKey(""); setLastError(""); setLiveStatus("practice discovery");
     setSavedContexts(await evidenceStore().contexts());
   }
@@ -1003,7 +1026,7 @@ export default function App() {
           <section style={styles.panel}>
             <h2 style={styles.h2}>Transcript export</h2>
             <div style={styles.sub}>
-              {packets.length} packets · {canonicalFrames.length} canonical frames · head {short(finalFrameHash, 18)}
+              {packetCount} packets · {canonicalFrameCount} canonical frames · head {short(finalFrameHash, 18)}
             </div>
             <div style={styles.row}>
               <button style={styles.smallButton} onClick={() => void exportTranscript(true)}>

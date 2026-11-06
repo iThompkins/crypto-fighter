@@ -156,7 +156,7 @@ export function recoverSigner(digestHex: string, signatureHex: string): string {
 
 // A packet is valid if its recomputed digest matches packet.hash and the
 // signature recovers to the session address committed in packet.publicKey.
-export async function verifyPacket(packet: SignedInputPacket): Promise<boolean> {
+export async function verifyPacket(packet: SignedInputPacket, expectedSigner?: string): Promise<boolean> {
   try {
     const digest = hashPacketFields(
       packet.matchId,
@@ -168,7 +168,7 @@ export async function verifyPacket(packet: SignedInputPacket): Promise<boolean> 
     );
     if (digest !== packet.hash) return false;
     const signer = recoverSigner(digest, packet.signature);
-    return signer.toLowerCase() === addressFromPublicKey(packet.publicKey).toLowerCase();
+    return signer.toLowerCase() === (expectedSigner ?? addressFromPublicKey(packet.publicKey)).toLowerCase();
   } catch {
     return false;
   }

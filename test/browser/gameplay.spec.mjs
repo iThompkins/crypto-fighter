@@ -113,11 +113,15 @@ test("two real browser peers finish an idle round with identical complete histor
   await joiner.getByPlaceholder("Paste host peer ID in joiner tab").fill(await host.getByTestId("peer-id").innerText());
   await joiner.getByRole("button", { name: "Connect", exact: true }).click();
   for (const page of [host, joiner]) await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  const liveStartedAt = Date.now();
   await host.getByRole("button", { name: "Start Match", exact: true }).click();
   for (const page of [host, joiner]) {
     await expect(page.getByText("300 / 300", { exact: true })).toBeVisible({ timeout: 45_000 });
     await developerMode(page);
   }
+  // Master regressed to roughly 22.6s for this nominal 10s round. Keep enough
+  // headroom for shared CI while preventing the slow-motion path from returning.
+  expect(Date.now() - liveStartedAt).toBeLessThan(18_000);
   const a = await exportTranscript(host);
   const b = await exportTranscript(joiner);
   expect(a.canonicalFrames).toHaveLength(300);
