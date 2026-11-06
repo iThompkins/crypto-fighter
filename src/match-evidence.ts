@@ -19,8 +19,15 @@ export function createMatchEvidence(authorization: GenesisAuthorization, record:
     { bindingHash: hashGenesisBinding(record.binding), authorization: structuredClone(authorization) });
 }
 
-export function createPacketEvidence(matchId: string, p1Session: string, p2Session: string, metadata: object = {}) {
+export function createPacketEvidence(
+  matchId: string,
+  p1Session: string,
+  p2Session: string,
+  metadata: object = {},
+  initialPerformanceObserver?: (durationMs: number) => void,
+) {
   let queue: Promise<unknown> = Promise.resolve();
+  let performanceObserver = initialPerformanceObserver;
   const serial = <T>(fn: () => Promise<T>): Promise<T> => { const next = queue.then(fn); queue = next.catch(() => {}); return next; };
   const packets = new Map<string, SignedInputPacket[]>();
   const participantKeys = new Map<1 | 2, string>();
@@ -42,8 +49,11 @@ export function createPacketEvidence(matchId: string, p1Session: string, p2Sessi
         const expected = p.player === 1 ? p1Session : p2Session;
         try {
           const pinnedKey = participantKeys.get(p.player);
-          if ((pinnedKey ? p.publicKey !== pinnedKey : addressFromPublicKey(p.publicKey).toLowerCase() !== expected.toLowerCase()) ||
-              !await verifyPacket(p, expected, pinnedKey ?? p.publicKey)) {
+          const publicKeyMatches = pinnedKey ? p.publicKey === pinnedKey : addressFromPublicKey(p.publicKey).toLowerCase() === expected.toLowerCase();
+          const verificationStartedAt = performance.now();
+          const verified = publicKeyMatches && await verifyPacket(p, expected, pinnedKey ?? p.publicKey);
+          performanceObserver?.(performance.now() - verificationStartedAt);
+          if (!verified) {
             return { kind: "unattributed-rejection", reason: "invalid authentication" };
           }
           participantKeys.set(p.player, p.publicKey);
@@ -99,6 +109,7 @@ export function createPacketEvidence(matchId: string, p1Session: string, p2Sessi
       if (!["disconnect", "stall", "reconnect"].includes(kind) || !Number.isSafeInteger(localTime) || localTime < 0 || !Number.isSafeInteger(frame) || frame < 0 || frame > ROUND_FRAMES) throw new Error("invalid local observation");
       if (observations.length < 1024) observations.push({ kind, localTime, frame });
     },
+    setPerformanceObserver(observer: (durationMs: number) => void) { performanceObserver = observer; },
     export() {
       return structuredClone({ version: 1 as const, ...metadata,
         packets: [...packets.values()].flat(), observations, settlementEligible: false as const });

@@ -10,6 +10,7 @@ export { configHash, lifecycleDigest, parseLiveMessage, verifyReady, object, hex
 export type { LiveConfig, LiveMessage, Ready } from "./live-protocol.ts";
 import { configHash, lifecycleDigest, parseLiveMessage, exact, object, type LiveConfig, type LiveMessage, type Ready } from "./live-protocol.ts";
 import type { EvidenceArchive } from "./evidence-archive.ts";
+import { LivePerformanceMetrics, type LivePerformanceReport } from "./live-performance.ts";
 
 export type LiveStatus = "prepared" | "running" | "disconnected" | "complete" | "conflict" | "storage-failed" | "inspection" | "closed";
 export class LiveMatch {
@@ -19,6 +20,7 @@ export class LiveMatch {
   private collector: ReturnType<typeof createPacketEvidence>;
   private ready = new Map<PlayerSlot, Ready>();
   private committed = new Map<string, SignedInputPacket>();
+  private validated = new Map<string, SignedInputPacket>();
   private queue: Promise<unknown> = Promise.resolve();
   private key?: SessionWallet;
   private connected = true;
@@ -31,14 +33,22 @@ export class LiveMatch {
   private frameHead = ZERO32;
   private history: EvidenceEvent[] = [];
   private store: EvidenceStore;
+  private performanceMetrics: LivePerformanceMetrics;
   readonly slot: PlayerSlot;
   private storageId: string;
   private constructor(config: LiveConfig, store: EvidenceStore, slot: PlayerSlot, key?: SessionWallet) {
     if (slot !== 1 && slot !== 2) throw new Error("Invalid local slot");
     this.store = store; this.slot = slot;
+    this.performanceMetrics = new LivePerformanceMetrics(slot);
     this.configValue = structuredClone(config); this.context = configHash(config); this.storageId = `${this.context}:${slot}`;
     this.key = key && structuredClone(key);
-    this.collector = createPacketEvidence(config.matchId, addressFromPublicKey(config.p1PublicKey), addressFromPublicKey(config.p2PublicKey));
+    this.collector = createPacketEvidence(
+      config.matchId,
+      addressFromPublicKey(config.p1PublicKey),
+      addressFromPublicKey(config.p2PublicKey),
+      {},
+      durationMs => this.performanceMetrics.record("signatureVerification", durationMs),
+    );
   }
   static async create(config: LiveConfig, store: EvidenceStore, slot: PlayerSlot, key: SessionWallet, record?: GenesisRecord) {
     const match = new LiveMatch(config, store, slot, key);
@@ -88,9 +98,20 @@ export class LiveMatch {
   attach() { this.generation++; this.connected = false; return this.generation; }
   close() { this.generation++; this.stopped = "closed"; this.key = undefined; }
   private check(generation: number) { if (generation !== this.generation || this.stopped === "closed") throw new Error("Stale lifecycle generation"); }
-  private serial<T>(fn: () => Promise<T>): Promise<T> { const next = this.queue.then(fn); this.queue = next.catch(() => {}); return next; }
+  private serial<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+    const queuedAt = performance.now();
+    const next = this.queue.then(() => {
+      this.performanceMetrics.recordQueue(operation, performance.now() - queuedAt);
+      return fn();
+    });
+    this.queue = next.catch(() => {});
+    return next;
+  }
   private async persist(event: EvidenceEvent) {
-    try { await this.store.append(this.storageId, event); this.history.push(structuredClone(event)); }
+    try {
+      await this.performanceMetrics.measure("indexedDbCommit", () => this.store.append(this.storageId, event));
+      this.history.push(structuredClone(event));
+    }
     catch (error) { this.stopped = "storage-failed"; throw error; }
   }
   private async commit(event: EvidenceEvent, generation: number) {
@@ -103,7 +124,8 @@ export class LiveMatch {
     const restored = new LiveMatch(this.config, this.store, this.slot);
     for (const event of this.history) if (event.kind === "message") await restored.admit(parseLiveMessage(event.message), false);
     this.check(generation);
-    this.collector = restored.collector; this.ready = restored.ready; this.committed = restored.committed;
+    this.collector = restored.collector; this.ready = restored.ready; this.committed = restored.committed; this.validated = restored.validated;
+    this.collector.setPerformanceObserver(durationMs => this.performanceMetrics.record("signatureVerification", durationMs));
     if (restored.stopped === "conflict") this.stopped = "conflict";
     this.needsReconcile = false;
   }
@@ -118,38 +140,73 @@ export class LiveMatch {
       if (persist) this.check(generation);
       if (result.kind === "unattributed-rejection") throw new Error(result.reason);
       if (result.kind === "equivocation") this.stopped = "conflict";
-      if (result.kind === "authenticated-packet") this.committed.set(`${message.packet.player}:${message.packet.frame}`, result.packet);
+      if (result.kind === "authenticated-packet") {
+        this.committed.set(`${message.packet.player}:${message.packet.frame}`, result.packet);
+        if (!result.duplicate) this.updateValidated(result.packet);
+      }
     } else {
       if (recoverSigner(lifecycleDigest(this.context, message.slot, message.type, message.type === "REQUEST" ? message.frame : 0), message.signature).toLowerCase() !== this.address(message.slot)) throw new Error("Unauthorized lifecycle signer");
       if (message.type === "READY" && !this.ready.has(message.slot)) {
         if (persist) await this.commit({ kind: "message", message }, generation);
         this.ready.set(message.slot, message);
+        if (this.ready.size === 2) this.performanceMetrics.waitForFrame(this.state.frame + 1);
       }
     }
   }
-  private validPackets() {
-    return new Map(this.collector.validatedPackets().map(p => [`${p.player}:${p.frame}`, p]));
+  private updateValidated(packet: SignedInputPacket) {
+    const startedAt = performance.now();
+    try {
+      const pending: [PlayerSlot, number][] = [[packet.player, packet.frame]];
+      const visited = new Set<string>();
+      while (pending.length) {
+        const [player, frame] = pending.shift()!;
+        const id = `${player}:${frame}`;
+        if (visited.has(id) || this.validated.has(id)) continue;
+        visited.add(id);
+        const candidate = this.committed.get(id);
+        if (!candidate) continue;
+        const other: PlayerSlot = player === 1 ? 2 : 1;
+        const self = frame === 1 ? ZERO32 : this.validated.get(`${player}:${frame - 1}`)?.hash;
+        const opponent = frame <= INPUT_DELAY ? ZERO32 : this.validated.get(`${other}:${frame - INPUT_DELAY}`)?.hash;
+        if (candidate.prevSelfHash !== self || candidate.prevOppHash !== opponent) continue;
+        this.validated.set(id, candidate);
+        if (frame < ROUND_FRAMES + INPUT_DELAY) pending.push([player, frame + 1]);
+        if (frame + INPUT_DELAY <= ROUND_FRAMES + INPUT_DELAY) pending.push([other, frame + INPUT_DELAY]);
+      }
+    }
+    finally { this.performanceMetrics.record("packetChainValidation", performance.now() - startedAt); }
   }
-  private advanceAvailable(all = false, valid = this.validPackets()) {
+  private advanceAvailable(all = false, valid = this.validated) {
     if (this.stopped || this.ready.size !== 2) return;
     do {
       const frame = this.state.frame + 1;
       const p1 = valid.get(`1:${frame}`), p2 = valid.get(`2:${frame}`);
-      if (!p1 || !p2 || this.state.roundOver) return;
+      if (!p1 || !p2 || this.state.roundOver) {
+        if (!this.state.roundOver) this.performanceMetrics.waitForFrame(frame);
+        return;
+      }
+      const simulationStartedAt = performance.now();
       const frameHash = hashFrameFields(this.config.matchId, frame, p1.inputMask, p2.inputMask, this.frameHead);
       this.frames.push({ matchId: this.config.matchId, frame, p1InputMask: p1.inputMask, p2InputMask: p2.inputMask, prevFrameHash: this.frameHead, frameHash });
       this.frameHead = frameHash; this.state = transition(this.state, p1.inputMask, p2.inputMask);
+      this.performanceMetrics.advanced(frame, performance.now() - simulationStartedAt, this.state.roundOver);
     } while (all);
   }
   async receive(value: unknown, generation = this.generation): Promise<LiveMessage[]> {
     const message = parseLiveMessage(value);
-    return this.serial(async () => {
+    return this.serial("receive", async () => {
       this.check(generation);
       if (!this.key || this.stopped === "storage-failed") throw new Error("Match cannot admit live messages");
       const remote = this.slot === 1 ? 2 : 1;
       if ((message.type === "INPUT" ? message.packet.player : message.slot) !== remote) throw new Error("Wrong participant slot");
       if (message.type === "INPUT" && message.packet.frame > this.state.frame + INPUT_DELAY + 2) throw new Error("Reordering window exceeded");
+      const alreadyCommitted = message.type === "INPUT" && this.committed.has(`${message.packet.player}:${message.packet.frame}`);
       await this.admit(message, true, generation); this.check(generation);
+      // A remote packet commonly completes the next canonical frame. Advance as
+      // soon as that packet is verified and its evidence transaction commits;
+      // waiting for the next input-production tick creates visible pause/catch-up
+      // bursts even though both signed inputs are already available.
+      if (message.type === "INPUT" && !alreadyCommitted) this.advanceAvailable();
       if (message.type === "REQUEST") {
         const packet = this.committed.get(`${this.slot}:${message.frame}`);
         return packet ? [{ type: "INPUT", context: this.context, packet }] : [];
@@ -158,7 +215,7 @@ export class LiveMatch {
     });
   }
   async consent(generation = this.generation): Promise<Ready> {
-    return this.serial(async () => {
+    return this.serial("consent", async () => {
       this.check(generation);
       if (!this.key || this.stopped) throw new Error("Signing authority unavailable");
       const old = this.ready.get(this.slot); if (old) return structuredClone(old);
@@ -168,7 +225,7 @@ export class LiveMatch {
     });
   }
   async transport(connected: boolean, generation = this.generation) {
-    return this.serial(async () => {
+    return this.serial("transport", async () => {
       this.check(generation);
       if (!this.key || this.stopped === "storage-failed") return;
       if (this.needsReconcile) await this.reconcile(generation);
@@ -184,11 +241,11 @@ export class LiveMatch {
   }
   async tick(mask: number, generation = this.generation): Promise<LiveMessage[]> {
     if (!isValidV1InputMask(mask)) throw new Error("Invalid input mask");
-    return this.serial(async () => {
+    return this.serial("tick", async () => {
       this.check(generation);
       if (this.status !== "running" || !this.key) return [];
       const result: LiveMessage[] = [];
-      const valid = this.validPackets();
+      const valid = this.validated;
       let frame = 1; while (this.committed.has(`${this.slot}:${frame}`)) frame++;
       while (frame <= Math.min(ROUND_FRAMES + INPUT_DELAY, this.state.frame + INPUT_DELAY)) {
         const prevSelfHash = frame === 1 ? ZERO32 : valid.get(`${this.slot}:${frame - 1}`)?.hash;
@@ -198,20 +255,21 @@ export class LiveMatch {
         if (!signing) {
           const hash = hashPacketFields(this.config.matchId, frame, this.slot, mask, prevSelfHash, prevOppHash);
           const fields = { matchId: this.config.matchId, frame, player: this.slot, inputMask: mask, prevSelfHash, prevOppHash, publicKey: this.key.publicKey, hash };
-          signing = signDigest(this.key.privateKey, hash).then(signature => ({ ...fields, signature }));
+          signing = this.performanceMetrics.measure("signing", () => signDigest(this.key!.privateKey, hash))
+            .then(signature => ({ ...fields, signature }));
           this.signedMoves.set(frame, signing);
         }
         const packet = await signing; this.check(generation);
         const message: LiveMessage = { type: "INPUT", context: this.context, packet };
         await this.admit(message, true, generation); this.check(generation);
-        valid.set(`${this.slot}:${frame}`, packet); result.push(message); frame++;
+        result.push(message); frame++;
       }
       this.advanceAvailable(false, valid);
       return result;
     });
   }
   async requestMissing(generation = this.generation): Promise<LiveMessage | undefined> {
-    return this.serial(async () => {
+    return this.serial("requestMissing", async () => {
       this.check(generation);
       if (!this.key || this.status !== "running") return;
       const remote = this.slot === 1 ? 2 : 1;
@@ -224,8 +282,15 @@ export class LiveMatch {
   exportEvidence(): Promise<EvidenceArchive> {
     // Queue barrier plus a transaction snapshot includes committed rows even if a
     // transport replacement interrupted their in-memory admission.
-    return this.serial(async () => ({ format: "phase-b-journal-v1", journal: await this.store.read(this.storageId) }));
+    return this.serial("exportEvidence", async () => ({ format: "phase-b-journal-v1", journal: await this.store.read(this.storageId) }));
   }
+  recordPacketDelivery(durationMs: number) { this.performanceMetrics.record("packetDelivery", durationMs); }
+  recordConnectionQueueWait(durationMs: number) { this.performanceMetrics.record("connectionQueueWait", durationMs); }
+  recordSchedulerLateness(durationMs: number, visibility: string) {
+    this.performanceMetrics.setVisibility(visibility);
+    this.performanceMetrics.record("schedulerLateness", durationMs);
+  }
+  performanceReport(): LivePerformanceReport { return this.performanceMetrics.report(); }
   snapshot() { return structuredClone({ status: this.status, haltReason: this.stopped ?? null, config: this.config, context: this.context, state: this.state, frames: this.frames, frameHead: this.frameHead,
     packets: [...this.committed.values()], evidence: this.collector.export(), history: this.history, settlementEligible: false }); }
   uiSnapshot() {

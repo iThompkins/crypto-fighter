@@ -34,6 +34,12 @@ function createPeer() {
   });
 }
 
+function sendPeerMessage(conn: DataConnection, message: unknown) {
+  if (object(message) && message.type === "INPUT") {
+    conn.send({ type: "TIMED_INPUT", sentAt: Date.now(), message });
+  } else conn.send(message);
+}
+
 export default function App() {
   const [state, setState] = useState<GameState>(initialState());
   const [matchId, setMatchId] = useState(makeMatchId);
@@ -117,6 +123,7 @@ export default function App() {
       uiSyncLiveRef.current = null;
       if (!pending || liveRef.current !== pending) return;
       const snapshot = pending.uiSnapshot();
+      Object.assign(window, { __cryptoFighterPerformance: pending.performanceReport() });
       setLiveStatus(`${snapshot.mode}: ${snapshot.status}`);
       stateRef.current = snapshot.state; setState(snapshot.state);
       setPackets(snapshot.packets); setCanonicalFrames(snapshot.frames);
@@ -221,7 +228,7 @@ export default function App() {
   }
 
   function sendHello(conn = connRef.current) {
-    if (conn?.open) conn.send({ type: "CHALLENGE", nonce: challengeRef.current });
+    if (conn?.open) sendPeerMessage(conn, { type: "CHALLENGE", nonce: challengeRef.current });
   }
 
   const log = useCallback((line: string) => {
@@ -278,14 +285,23 @@ export default function App() {
     });
     conn.on("data", (raw: unknown) => {
       if (!current()) return;
+      const receivedAt = performance.now();
       // Bound the wire payload before cloning and expensive cryptography.
       try { if (JSON.stringify(raw).length > 16000) throw new Error("Message too large"); }
       catch { return; }
       if (queued >= 128) return;
       queued++;
-      const value = structuredClone(raw);
+      let wireValue = raw;
+      if (object(raw) && raw.type === "TIMED_INPUT" && Object.keys(raw).sort().join() === "message,sentAt,type" &&
+          Number.isFinite(raw.sentAt) && object(raw.message) && raw.message.type === "INPUT") {
+        const deliveryMs = Date.now() - Number(raw.sentAt);
+        if (deliveryMs >= 0 && deliveryMs <= 60_000) liveRef.current?.recordPacketDelivery(deliveryMs);
+        wireValue = raw.message;
+      }
+      const value = structuredClone(wireValue);
       admissionRef.current = admissionRef.current.then(async () => {
         if (!current()) return;
+        liveRef.current?.recordConnectionQueueWait(performance.now() - receivedAt);
         await handleNetMessage(value, current);
       }).catch(e => { if (current()) { setLastError(String(e)); if (liveRef.current) syncLive(liveRef.current); } }).finally(() => { queued--; });
     });
@@ -322,7 +338,7 @@ export default function App() {
       const key = walletRef.current;
       if (!key) return;
       const message = await hello(key, matchIdRef.current, localSlotRef.current, raw.nonce);
-      if (current()) connRef.current?.send(message);
+      if (current() && connRef.current) sendPeerMessage(connRef.current, message);
       return;
     }
     if (raw.type === "HELLO") {
@@ -340,8 +356,8 @@ export default function App() {
         await live.transport(true); if (!current()) return;
         if (localSlotRef.current === 1) {
           const ready = await live.consent(); if (!current()) return;
-          connRef.current?.send({ type: "OFFER", config: live.config, ready });
-        } else for (const message of live.retransmit()) connRef.current?.send(message);
+          if (connRef.current) sendPeerMessage(connRef.current, { type: "OFFER", config: live.config, ready });
+        } else if (connRef.current) for (const message of live.retransmit()) sendPeerMessage(connRef.current, message);
         syncLive(live);
       }
       authenticatedConnRef.current = connRef.current;
@@ -368,14 +384,14 @@ export default function App() {
       }
       await live.receive(raw.ready); if (!current()) return;
       const ready = await live.consent(); if (!current()) return;
-      connRef.current?.send(ready); syncLive(live);
+      if (connRef.current) sendPeerMessage(connRef.current, ready); syncLive(live);
       return;
     }
     const live = liveRef.current;
     if (!live) throw new Error("No admitted live match");
     const outbound = await live.receive(raw);
     if (!current()) return;
-    outbound.forEach(message => connRef.current?.send(message)); syncLive(live);
+    if (connRef.current) outbound.forEach(message => sendPeerMessage(connRef.current!, message)); syncLive(live);
   }
 
   // Symmetric controls: every player uses the same keys for their own fighter
@@ -398,12 +414,12 @@ export default function App() {
     try {
       const outbound = await live.tick(currentLocalInputMask());
       if (generation !== generationRef.current || liveRef.current !== live || connRef.current !== conn) return;
-      outbound.forEach(message => conn.send(message));
+      outbound.forEach(message => sendPeerMessage(conn, message));
       if (Date.now() - retryRef.current > 500) {
         retryRef.current = Date.now();
         const request = await live.requestMissing();
         if (generation !== generationRef.current || liveRef.current !== live) return;
-        if (request) conn.send(request);
+        if (request) sendPeerMessage(conn, request);
       }
       syncLive(live);
     } catch (error) { if (generation === generationRef.current) { setLastError(String(error)); syncLive(live); } }
@@ -422,6 +438,7 @@ export default function App() {
     let cancelled = false;
     let deadline = performance.now() + 1000 / FPS;
     const run = async () => {
+      liveRef.current?.recordSchedulerLateness(Math.max(0, performance.now() - deadline), document.visibilityState);
       await tick();
       if (cancelled) return;
       deadline += 1000 / FPS;
@@ -534,7 +551,7 @@ export default function App() {
       }
       const ready = await live.consent();
       if (generation !== generationRef.current) return;
-      conn.send({ type: "OFFER", config: live.config, ready }); syncLive(live);
+      sendPeerMessage(conn, { type: "OFFER", config: live.config, ready }); syncLive(live);
     } catch (error) { if (generation === generationRef.current) setLastError(String(error)); }
     finally { if (preparationRef.current === preparation) preparationRef.current = null; }
   }

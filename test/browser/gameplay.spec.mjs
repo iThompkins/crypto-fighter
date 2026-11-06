@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { auth, record } from "../fixtures/genesis.mjs";
 
 async function developerMode(page) {
@@ -122,6 +122,26 @@ test("two real browser peers finish an idle round with identical complete histor
   // Master regressed to roughly 22.6s for this nominal 10s round. Keep enough
   // headroom for shared CI while preventing the slow-motion path from returning.
   expect(Date.now() - liveStartedAt).toBeLessThan(18_000);
+  const performanceReports = await Promise.all([host, joiner].map(page => page.evaluate(() => window.__cryptoFighterPerformance)));
+  for (const [index, report] of performanceReports.entries()) {
+    expect(report.slot).toBe(index + 1);
+    expect(report.metrics.frameGap.count).toBe(300);
+    for (const metric of [
+      'signing', 'signatureVerification', 'indexedDbCommit', 'queueWait',
+      'packetDelivery', 'missingInputWait', 'simulationAdvancement',
+    ]) expect(report.metrics[metric].count).toBeGreaterThan(0);
+    // Guard frame cadence itself: a fast total duration can still conceal the
+    // observed pause followed by several catch-up frames.
+    expect(report.metrics.frameGap.p95).toBeLessThan(85);
+    expect(report.pauses.filter(pause => pause.frame > 3).length).toBeLessThan(25);
+    // Rebuilding and cloning the full packet chain here regresses to ~5 ms p95
+    // and creates increasing scheduler debt late in a round.
+    expect(report.metrics.packetChainValidation.p95).toBeLessThan(2);
+    await testInfo.attach(`player-${index + 1}-live-performance.json`, {
+      body: JSON.stringify(report, null, 2), contentType: 'application/json',
+    });
+    await writeFile(testInfo.outputPath(`player-${index + 1}-live-performance.json`), JSON.stringify(report, null, 2));
+  }
   const a = await exportTranscript(host);
   const b = await exportTranscript(joiner);
   expect(a.canonicalFrames).toHaveLength(300);
@@ -133,7 +153,6 @@ test("two real browser peers finish an idle round with identical complete histor
     expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
     const file = testInfo.outputPath(`${name}.json`);
-    const { writeFile } = await import("node:fs/promises");
     await writeFile(file, JSON.stringify(transcript));
     const cli = JSON.parse(execFileSync(process.execPath, ["tools/verify-match.mjs", file], { encoding: "utf8" }));
     expect(cli.replay).toEqual(result.replay);
@@ -145,7 +164,6 @@ test("two real browser peers finish an idle round with identical complete histor
   expect(artifact.reconstruction.status).toBe("complete");
   expect(artifact.reconstruction.transcript).toEqual(a);
   const archiveFile = testInfo.outputPath("live-archive.json");
-  const { writeFile } = await import("node:fs/promises");
   await writeFile(archiveFile, JSON.stringify(artifact.archive));
   const rebuilt = execFileSync(process.execPath, ["tools/evidence-trace.mjs", "build", archiveFile], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   expect(rebuilt.trim()).toBe(artifactText);

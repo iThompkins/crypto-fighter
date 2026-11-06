@@ -49,9 +49,12 @@ test('duplicates are idempotent and reordered signed dependencies become usable 
   assert.equal(request.frame, 1);
   const retransmission = await a.receive(request);
   assert.deepEqual(retransmission, [messages[0]]);
-  await b.receive(retransmission[0]); await b.receive(messages[0]);
-  await b.tick(0);
+  await b.receive(retransmission[0]);
   assert.equal(b.snapshot().state.frame, 1);
+  await b.receive(messages[0]);
+  assert.equal(b.snapshot().state.frame, 1);
+  await b.tick(0);
+  assert.equal(b.snapshot().state.frame, 2);
   assert.equal(b.snapshot().packets.filter(p => p.player === 1).length, 2);
   assert.equal(b.snapshot().history.filter(e => e.message?.type === 'INPUT' && e.message.packet.player === 1).length, 2);
 });
@@ -60,8 +63,9 @@ test('late signed conflict is preserved, halts play, and survives reload without
   const aa = await a.tick(0), bb = await b.tick(0);
   for (const p of aa) await b.receive(p);
   for (const p of bb) await a.receive(p);
+  assert.equal(a.snapshot().state.frame, 2);
   await a.tick(0);
-  assert.equal(a.snapshot().state.frame, 1);
+  assert.equal(a.snapshot().state.frame, 2);
   await a.receive(input(2, 1, 1));
   assert.equal(a.status, 'conflict');
   assert.equal(a.snapshot().evidence.packets.filter(p => p.player === 2 && p.frame === 1).length, 2);
