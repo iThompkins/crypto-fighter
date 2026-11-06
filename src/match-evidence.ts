@@ -43,7 +43,7 @@ export function createPacketEvidence(matchId: string, p1Session: string, p2Sessi
         try {
           const pinnedKey = participantKeys.get(p.player);
           if ((pinnedKey ? p.publicKey !== pinnedKey : addressFromPublicKey(p.publicKey).toLowerCase() !== expected.toLowerCase()) ||
-              !await verifyPacket(p, expected)) {
+              !await verifyPacket(p, expected, pinnedKey ?? p.publicKey)) {
             return { kind: "unattributed-rejection", reason: "invalid authentication" };
           }
           participantKeys.set(p.player, p.publicKey);
