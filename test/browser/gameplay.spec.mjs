@@ -21,6 +21,39 @@ async function browserVerify(page, transcript) {
   }, transcript);
 }
 
+async function emulateBackgroundTab(page) {
+  await page.addInitScript(() => {
+    const nativeRaf = window.requestAnimationFrame.bind(window);
+    const nativeCancelRaf = window.cancelAnimationFrame.bind(window);
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    const queued = new Map();
+    let nextId = -1;
+    let hidden = true;
+    let throttleTimers = false;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    window.requestAnimationFrame = callback => {
+      if (!hidden) return nativeRaf(callback);
+      const id = nextId--;
+      queued.set(id, callback);
+      return id;
+    };
+    window.cancelAnimationFrame = id => {
+      if (!queued.delete(id)) nativeCancelRaf(id);
+    };
+    window.setTimeout = (callback, delay = 0, ...args) =>
+      nativeSetTimeout(callback, throttleTimers ? Math.max(Number(delay), 1_000) : delay, ...args);
+    window.__throttleCryptoFighterBackgroundTimers = () => { throttleTimers = true; };
+    window.__resumeCryptoFighterTab = () => {
+      hidden = false;
+      throttleTimers = false;
+      document.dispatchEvent(new Event('visibilitychange'));
+      for (const callback of queued.values()) nativeRaf(callback);
+      queued.clear();
+    };
+  });
+}
+
 test("generated terminal replay agrees in browser and CLI; transaction controls are absent", async ({ page }, testInfo) => {
   const file = testInfo.outputPath("terminal.json");
   execFileSync(process.execPath, ["tools/make-transcript.mjs", file]);
@@ -102,6 +135,7 @@ test("two real browser peers finish an idle round with identical complete histor
   test.setTimeout(120_000);
   const host = await context.newPage();
   const joiner = await context.newPage();
+  await emulateBackgroundTab(joiner);
   const errors = [];
   for (const page of [host, joiner]) page.on("pageerror", (error) => errors.push(error.message));
   await Promise.all([host.goto("/"), joiner.goto("/")]);
@@ -113,10 +147,14 @@ test("two real browser peers finish an idle round with identical complete histor
   await joiner.getByPlaceholder("Paste host peer ID in joiner tab").fill(await host.getByTestId("peer-id").innerText());
   await joiner.getByRole("button", { name: "Connect", exact: true }).click();
   for (const page of [host, joiner]) await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  expect(await joiner.evaluate(() => document.visibilityState)).toBe('hidden');
+  await joiner.evaluate(() => window.__throttleCryptoFighterBackgroundTimers());
   const liveStartedAt = Date.now();
   await host.getByRole("button", { name: "Start Match", exact: true }).click();
+  await expect(host.getByText("300 / 300", { exact: true })).toBeVisible({ timeout: 45_000 });
+  await joiner.evaluate(() => window.__resumeCryptoFighterTab());
+  await expect(joiner.getByText("300 / 300", { exact: true })).toBeVisible({ timeout: 5_000 });
   for (const page of [host, joiner]) {
-    await expect(page.getByText("300 / 300", { exact: true })).toBeVisible({ timeout: 45_000 });
     await developerMode(page);
   }
   // Master regressed to roughly 22.6s for this nominal 10s round. Keep enough

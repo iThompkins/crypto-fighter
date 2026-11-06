@@ -36,7 +36,7 @@ function createPeer() {
 
 function sendPeerMessage(conn: DataConnection, message: unknown) {
   if (object(message) && message.type === "INPUT") {
-    conn.send({ type: "TIMED_INPUT", sentAt: Date.now(), message });
+    conn.send({ type: "TIMED_INPUT", sentAt: Date.now(), visibility: document.visibilityState, message });
   } else conn.send(message);
 }
 
@@ -115,6 +115,11 @@ export default function App() {
   function evidenceStore() { return storeRef.current ??= new BrowserEvidenceStore(); }
   const syncLive = useCallback((live: LiveMatch) => {
     if (liveRef.current !== live) return;
+    // Protocol scheduling must not depend on requestAnimationFrame: browsers
+    // suspend it in a background tab even though peer data can still arrive.
+    const status = live.status;
+    setLiveStatus(`${live.config.mode}: ${status}`);
+    setIsRunning(status === "running");
     uiSyncLiveRef.current = live;
     if (uiSyncRef.current !== null) return;
     uiSyncRef.current = window.requestAnimationFrame(() => {
@@ -158,11 +163,14 @@ export default function App() {
     const up = (e: KeyboardEvent) => {
       keyState.current[e.key.toLowerCase()] = false;
     };
+    const visibility = () => { if (document.visibilityState === "hidden") keyState.current = {}; };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    document.addEventListener("visibilitychange", visibility);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      document.removeEventListener("visibilitychange", visibility);
     };
   }, []);
 
@@ -292,17 +300,20 @@ export default function App() {
       if (queued >= 128) return;
       queued++;
       let wireValue = raw;
-      if (object(raw) && raw.type === "TIMED_INPUT" && Object.keys(raw).sort().join() === "message,sentAt,type" &&
-          Number.isFinite(raw.sentAt) && object(raw.message) && raw.message.type === "INPUT") {
+      let visibleSender = false;
+      if (object(raw) && raw.type === "TIMED_INPUT" && Object.keys(raw).sort().join() === "message,sentAt,type,visibility" &&
+          Number.isFinite(raw.sentAt) && (raw.visibility === "visible" || raw.visibility === "hidden") &&
+          object(raw.message) && raw.message.type === "INPUT") {
         const deliveryMs = Date.now() - Number(raw.sentAt);
         if (deliveryMs >= 0 && deliveryMs <= 60_000) liveRef.current?.recordPacketDelivery(deliveryMs);
+        visibleSender = raw.visibility === "visible";
         wireValue = raw.message;
       }
       const value = structuredClone(wireValue);
       admissionRef.current = admissionRef.current.then(async () => {
         if (!current()) return;
         liveRef.current?.recordConnectionQueueWait(performance.now() - receivedAt);
-        await handleNetMessage(value, current);
+        await handleNetMessage(value, current, visibleSender);
       }).catch(e => { if (current()) { setLastError(String(e)); if (liveRef.current) syncLive(liveRef.current); } }).finally(() => { queued--; });
     });
     conn.on("close", () => {
@@ -331,7 +342,7 @@ export default function App() {
     }
   }
 
-  async function handleNetMessage(raw: unknown, current: () => boolean) {
+  async function handleNetMessage(raw: unknown, current: () => boolean, visibleSender = false) {
     if (!object(raw) || typeof raw.type !== "string") throw new Error("Invalid envelope");
     if (raw.type === "CHALLENGE") {
       if (Object.keys(raw).sort().join() !== "nonce,type" || !hex(raw.nonce, 32)) throw new Error("Invalid discovery challenge");
@@ -385,12 +396,26 @@ export default function App() {
       await live.receive(raw.ready); if (!current()) return;
       const ready = await live.consent(); if (!current()) return;
       if (connRef.current) sendPeerMessage(connRef.current, ready); syncLive(live);
+      // The host was necessarily visible to click Start Match. Seed a hidden
+      // joiner's input pipeline without waiting for its throttled timer.
+      if (document.visibilityState === "hidden" && connRef.current) {
+        const outbound = await live.tick(currentLocalInputMask());
+        if (!current()) return;
+        outbound.forEach(message => sendPeerMessage(connRef.current!, message));
+      }
       return;
     }
     const live = liveRef.current;
     if (!live) throw new Error("No admitted live match");
     const outbound = await live.receive(raw);
     if (!current()) return;
+    // A visible peer remains the real-time clock. A hidden peer responds to its
+    // signed input events because background-tab timers are heavily throttled.
+    // If both peers are hidden, neither reports visible and the match pauses.
+    if (raw.type === "INPUT" && visibleSender && document.visibilityState === "hidden") {
+      outbound.push(...await live.tick(currentLocalInputMask()));
+      if (!current()) return;
+    }
     if (connRef.current) outbound.forEach(message => sendPeerMessage(connRef.current!, message)); syncLive(live);
   }
 
@@ -536,7 +561,11 @@ export default function App() {
 
   async function startMatch() {
     const generation = generationRef.current, conn = connRef.current, key = walletRef.current;
-    if (!isConnected || !conn?.open || !key || localSlotRef.current !== 1) return;
+    setLastError("");
+    if (!isConnected) { setLastError("Connect the two peers before starting the match."); return; }
+    if (!conn?.open) { setLastError("The peer connection closed; reconnect before starting."); return; }
+    if (!key) { setLastError("The session key is still being prepared; try Start Match again."); return; }
+    if (localSlotRef.current !== 1) { setLastError("Only the host tab can start the match."); return; }
     const preparation = Symbol("match preparation");
     try {
       if (preparationRef.current) throw new Error("Match preparation already in progress");
