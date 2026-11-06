@@ -141,6 +141,10 @@ export async function signDigest(privateKeyHex: string, digestHex: string): Prom
 
 // Recover the signer address from a 65-byte signature over a digest.
 export function recoverSigner(digestHex: string, signatureHex: string): string {
+  return addressFromPublicKey(recoverPublicKey(digestHex, signatureHex));
+}
+
+function recoverPublicKey(digestHex: string, signatureHex: string): string {
   const sig = hexToBytes(strip0x(signatureHex));
   if (sig.length !== 65) throw new Error("expected 65-byte signature");
   if (sig[64] !== 27 && sig[64] !== 28) throw new Error("bad recovery id");
@@ -151,12 +155,13 @@ export function recoverSigner(digestHex: string, signatureHex: string): string {
     .addRecoveryBit(recovery)
     .recoverPublicKey(hexToBytes(strip0x(digestHex)))
     .toRawBytes(false);
-  return addressFromPublicKey("0x" + bytesToHex(recovered));
+  return "0x" + bytesToHex(recovered);
 }
 
 // A packet is valid if its recomputed digest matches packet.hash and the
-// signature recovers to the session address committed in packet.publicKey.
-export async function verifyPacket(packet: SignedInputPacket): Promise<boolean> {
+// signature recovers to the pinned session public key/address. Live admission
+// supplies the already-validated public key to avoid reparsing and rehashing it.
+export async function verifyPacket(packet: SignedInputPacket, expectedSigner?: string, expectedPublicKey?: string): Promise<boolean> {
   try {
     const digest = hashPacketFields(
       packet.matchId,
@@ -167,8 +172,9 @@ export async function verifyPacket(packet: SignedInputPacket): Promise<boolean> 
       packet.prevOppHash
     );
     if (digest !== packet.hash) return false;
+    if (expectedPublicKey) return recoverPublicKey(digest, packet.signature).toLowerCase() === expectedPublicKey.toLowerCase();
     const signer = recoverSigner(digest, packet.signature);
-    return signer.toLowerCase() === addressFromPublicKey(packet.publicKey).toLowerCase();
+    return signer.toLowerCase() === (expectedSigner ?? addressFromPublicKey(packet.publicKey)).toLowerCase();
   } catch {
     return false;
   }

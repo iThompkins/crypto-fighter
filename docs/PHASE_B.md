@@ -112,11 +112,12 @@ during that interval therefore still halts play.
 
 ## Persistence model
 
-`BrowserEvidenceStore` uses IndexedDB with strict-durability read/write
-transactions. The commit boundary is transaction completion, not request success.
-Initialization checks and writes atomically, preventing two tabs from acquiring
-the same local journal. Journals are keyed by descriptor hash and local slot, so
-two players on the same origin keep independent histories.
+`BrowserEvidenceStore` uses one registered IndexedDB journal per descriptor hash
+and local slot. That prevents two same-origin players from serializing every
+packet through one database while keeping initialization atomic for each journal.
+Read/write transactions use relaxed durability, but transaction completion—not
+request success—remains the send/use boundary. Two tabs cannot acquire the same
+local journal.
 
 The append journal contains:
 
@@ -140,10 +141,13 @@ explicit halt reason rather than a certified replay result. Persisted genesis re
 trusted live-chain lookup. Saved evidence can be downloaded after reload. Recovery
 may reconstruct more committed frames than had been rendered before a crash.
 
-IndexedDB is local storage, not a data-availability service. The guarantee covers
-browser reload/crash under the browser's transaction durability semantics, not
-user deletion, origin compromise, eviction, disk loss, or malicious storage edits.
-Invalid recovered evidence is rejected. Exported copies remain useful backups.
+IndexedDB is local storage, not a data-availability service. Normal reload and
+renderer-crash recovery retain completed transactions, but relaxed durability
+allows a sudden OS or power loss to lose the newest rows before the browser
+physically flushes them. Such a gap is unavailable evidence, never permission to
+invent a packet or resume signing. The guarantee also excludes user deletion,
+origin compromise, eviction, disk loss, and malicious storage edits. Invalid
+recovered evidence is rejected. Exported copies remain useful backups.
 
 ## Later-phase assumptions
 

@@ -34,6 +34,12 @@ function createPeer() {
   });
 }
 
+function sendPeerMessage(conn: DataConnection, message: unknown) {
+  if (object(message) && message.type === "INPUT") {
+    conn.send({ type: "TIMED_INPUT", sentAt: Date.now(), focused: document.hasFocus(), visibility: document.visibilityState, message });
+  } else conn.send(message);
+}
+
 export default function App() {
   const [state, setState] = useState<GameState>(initialState());
   const [matchId, setMatchId] = useState(makeMatchId);
@@ -52,6 +58,8 @@ export default function App() {
 
   const [packets, setPackets] = useState<SignedInputPacket[]>([]);
   const [canonicalFrames, setCanonicalFrames] = useState<CanonicalFrame[]>([]);
+  const [packetCount, setPacketCount] = useState(0);
+  const [canonicalFrameCount, setCanonicalFrameCount] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [lastError, setLastError] = useState("");
   const [finalStateHash, setFinalStateHash] = useState("");
@@ -102,15 +110,32 @@ export default function App() {
   const [liveStatus, setLiveStatus] = useState("practice discovery");
   const [savedContexts, setSavedContexts] = useState<string[]>([]);
   const retryRef = useRef(0);
+  const uiSyncRef = useRef<number | null>(null);
+  const uiSyncLiveRef = useRef<LiveMatch | null>(null);
   function evidenceStore() { return storeRef.current ??= new BrowserEvidenceStore(); }
   const syncLive = useCallback((live: LiveMatch) => {
     if (liveRef.current !== live) return;
-    const snapshot = live.snapshot();
-    setLiveStatus(`${snapshot.config.mode}: ${snapshot.status}`);
-    stateRef.current = snapshot.state; setState(snapshot.state);
-    setPackets(snapshot.packets); setCanonicalFrames(snapshot.frames);
-    frameHeadRef.current = snapshot.frameHead; setFinalFrameHash(snapshot.frameHead);
-    setIsRunning(snapshot.status === "running");
+    // Protocol scheduling must not depend on requestAnimationFrame: browsers
+    // suspend it in a background tab even though peer data can still arrive.
+    const status = live.status;
+    setLiveStatus(`${live.config.mode}: ${status}`);
+    setIsRunning(status === "running");
+    uiSyncLiveRef.current = live;
+    if (uiSyncRef.current !== null) return;
+    uiSyncRef.current = window.requestAnimationFrame(() => {
+      uiSyncRef.current = null;
+      const pending = uiSyncLiveRef.current;
+      uiSyncLiveRef.current = null;
+      if (!pending || liveRef.current !== pending) return;
+      const snapshot = pending.uiSnapshot();
+      Object.assign(window, { __cryptoFighterPerformance: pending.performanceReport() });
+      setLiveStatus(`${snapshot.mode}: ${snapshot.status}`);
+      stateRef.current = snapshot.state; setState(snapshot.state);
+      setPackets(snapshot.packets); setCanonicalFrames(snapshot.frames);
+      setPacketCount(snapshot.packetCount); setCanonicalFrameCount(snapshot.frameCount);
+      frameHeadRef.current = snapshot.frameHead; setFinalFrameHash(snapshot.frameHead);
+      setIsRunning(snapshot.status === "running");
+    });
   }, []);
 
   useEffect(() => { void evidenceStore().contexts().then(setSavedContexts).catch(e => setLastError(String(e))); }, []);
@@ -138,11 +163,14 @@ export default function App() {
     const up = (e: KeyboardEvent) => {
       keyState.current[e.key.toLowerCase()] = false;
     };
+    const visibility = () => { if (document.visibilityState === "hidden") keyState.current = {}; };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    document.addEventListener("visibilitychange", visibility);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      document.removeEventListener("visibilitychange", visibility);
     };
   }, []);
 
@@ -161,6 +189,8 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (intervalRef.current) window.clearInterval(intervalRef.current);
+      if (uiSyncRef.current !== null) window.cancelAnimationFrame(uiSyncRef.current);
+      uiSyncLiveRef.current = null;
       // This is a generation counter, not a DOM ref; invalidate current work on cleanup.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       generationRef.current++;
@@ -206,7 +236,7 @@ export default function App() {
   }
 
   function sendHello(conn = connRef.current) {
-    if (conn?.open) conn.send({ type: "CHALLENGE", nonce: challengeRef.current });
+    if (conn?.open) sendPeerMessage(conn, { type: "CHALLENGE", nonce: challengeRef.current });
   }
 
   const log = useCallback((line: string) => {
@@ -263,15 +293,27 @@ export default function App() {
     });
     conn.on("data", (raw: unknown) => {
       if (!current()) return;
+      const receivedAt = performance.now();
       // Bound the wire payload before cloning and expensive cryptography.
       try { if (JSON.stringify(raw).length > 16000) throw new Error("Message too large"); }
       catch { return; }
       if (queued >= 128) return;
       queued++;
-      const value = structuredClone(raw);
+      let wireValue = raw;
+      let focusedSender = false;
+      if (object(raw) && raw.type === "TIMED_INPUT" && Object.keys(raw).sort().join() === "focused,message,sentAt,type,visibility" &&
+          Number.isFinite(raw.sentAt) && typeof raw.focused === "boolean" && (raw.visibility === "visible" || raw.visibility === "hidden") &&
+          object(raw.message) && raw.message.type === "INPUT") {
+        const deliveryMs = Date.now() - Number(raw.sentAt);
+        if (deliveryMs >= 0 && deliveryMs <= 60_000) liveRef.current?.recordPacketDelivery(deliveryMs);
+        focusedSender = raw.focused;
+        wireValue = raw.message;
+      }
+      const value = structuredClone(wireValue);
       admissionRef.current = admissionRef.current.then(async () => {
         if (!current()) return;
-        await handleNetMessage(value, current);
+        liveRef.current?.recordConnectionQueueWait(performance.now() - receivedAt);
+        await handleNetMessage(value, current, focusedSender);
       }).catch(e => { if (current()) { setLastError(String(e)); if (liveRef.current) syncLive(liveRef.current); } }).finally(() => { queued--; });
     });
     conn.on("close", () => {
@@ -300,14 +342,14 @@ export default function App() {
     }
   }
 
-  async function handleNetMessage(raw: unknown, current: () => boolean) {
+  async function handleNetMessage(raw: unknown, current: () => boolean, focusedSender = false) {
     if (!object(raw) || typeof raw.type !== "string") throw new Error("Invalid envelope");
     if (raw.type === "CHALLENGE") {
       if (Object.keys(raw).sort().join() !== "nonce,type" || !hex(raw.nonce, 32)) throw new Error("Invalid discovery challenge");
       const key = walletRef.current;
       if (!key) return;
       const message = await hello(key, matchIdRef.current, localSlotRef.current, raw.nonce);
-      if (current()) connRef.current?.send(message);
+      if (current() && connRef.current) sendPeerMessage(connRef.current, message);
       return;
     }
     if (raw.type === "HELLO") {
@@ -325,8 +367,8 @@ export default function App() {
         await live.transport(true); if (!current()) return;
         if (localSlotRef.current === 1) {
           const ready = await live.consent(); if (!current()) return;
-          connRef.current?.send({ type: "OFFER", config: live.config, ready });
-        } else for (const message of live.retransmit()) connRef.current?.send(message);
+          if (connRef.current) sendPeerMessage(connRef.current, { type: "OFFER", config: live.config, ready });
+        } else if (connRef.current) for (const message of live.retransmit()) sendPeerMessage(connRef.current, message);
         syncLive(live);
       }
       authenticatedConnRef.current = connRef.current;
@@ -353,14 +395,28 @@ export default function App() {
       }
       await live.receive(raw.ready); if (!current()) return;
       const ready = await live.consent(); if (!current()) return;
-      connRef.current?.send(ready); syncLive(live);
+      if (connRef.current) sendPeerMessage(connRef.current, ready); syncLive(live);
+      // The host was necessarily visible to click Start Match. Seed a hidden
+      // joiner's input pipeline without waiting for its throttled timer.
+      if (document.visibilityState === "hidden" && connRef.current) {
+        const outbound = await live.tick(currentLocalInputMask());
+        if (!current()) return;
+        outbound.forEach(message => sendPeerMessage(connRef.current!, message));
+      }
       return;
     }
     const live = liveRef.current;
     if (!live) throw new Error("No admitted live match");
     const outbound = await live.receive(raw);
     if (!current()) return;
-    outbound.forEach(message => connRef.current?.send(message)); syncLive(live);
+    // The focused peer remains the real-time clock. Its unfocused counterpart
+    // responds to signed input events because background-tab timers are heavily
+    // throttled. Two focused peers use their normal timers and do not ping-pong.
+    if (raw.type === "INPUT" && focusedSender && !document.hasFocus()) {
+      outbound.push(...await live.tick(currentLocalInputMask()));
+      if (!current()) return;
+    }
+    if (connRef.current) outbound.forEach(message => sendPeerMessage(connRef.current!, message)); syncLive(live);
   }
 
   // Symmetric controls: every player uses the same keys for their own fighter
@@ -383,12 +439,12 @@ export default function App() {
     try {
       const outbound = await live.tick(currentLocalInputMask());
       if (generation !== generationRef.current || liveRef.current !== live || connRef.current !== conn) return;
-      outbound.forEach(message => conn.send(message));
+      outbound.forEach(message => sendPeerMessage(conn, message));
       if (Date.now() - retryRef.current > 500) {
         retryRef.current = Date.now();
         const request = await live.requestMissing();
         if (generation !== generationRef.current || liveRef.current !== live) return;
-        if (request) conn.send(request);
+        if (request) sendPeerMessage(conn, request);
       }
       syncLive(live);
     } catch (error) { if (generation === generationRef.current) { setLastError(String(error)); syncLive(live); } }
@@ -404,13 +460,22 @@ export default function App() {
       return;
     }
 
-    intervalRef.current = window.setInterval(() => {
-      void tick();
-    }, 1000 / FPS);
+    let cancelled = false;
+    let deadline = performance.now() + 1000 / FPS;
+    const run = async () => {
+      liveRef.current?.recordSchedulerLateness(Math.max(0, performance.now() - deadline), document.visibilityState);
+      await tick();
+      if (cancelled) return;
+      deadline += 1000 / FPS;
+      const delay = Math.max(0, deadline - performance.now());
+      intervalRef.current = window.setTimeout(() => void run(), delay);
+    };
+    intervalRef.current = window.setTimeout(() => void run(), 1000 / FPS);
 
     return () => {
+      cancelled = true;
       if (intervalRef.current) {
-        window.clearInterval(intervalRef.current);
+        window.clearTimeout(intervalRef.current);
         intervalRef.current = null;
       }
     };
@@ -489,14 +554,18 @@ export default function App() {
     if (generation !== generationRef.current) return;
     updateWallet(newWallet); updateMatchId(makeMatchId());
     stateRef.current = initialState(); setState(stateRef.current);
-    setPackets([]); setCanonicalFrames([]); setFinalFrameHash(ZERO32); setFinalStateHash("");
+    setPackets([]); setCanonicalFrames([]); setPacketCount(0); setCanonicalFrameCount(0); setFinalFrameHash(ZERO32); setFinalStateHash("");
     setRemoteWalletAddress(""); updateRemoteWalletPubKey(""); setLastError(""); setLiveStatus("practice discovery");
     setSavedContexts(await evidenceStore().contexts());
   }
 
   async function startMatch() {
     const generation = generationRef.current, conn = connRef.current, key = walletRef.current;
-    if (!isConnected || !conn?.open || !key || localSlotRef.current !== 1) return;
+    setLastError("");
+    if (!isConnected) { setLastError("Connect the two peers before starting the match."); return; }
+    if (!conn?.open) { setLastError("The peer connection closed; reconnect before starting."); return; }
+    if (!key) { setLastError("The session key is still being prepared; try Start Match again."); return; }
+    if (localSlotRef.current !== 1) { setLastError("Only the host tab can start the match."); return; }
     const preparation = Symbol("match preparation");
     try {
       if (preparationRef.current) throw new Error("Match preparation already in progress");
@@ -511,7 +580,7 @@ export default function App() {
       }
       const ready = await live.consent();
       if (generation !== generationRef.current) return;
-      conn.send({ type: "OFFER", config: live.config, ready }); syncLive(live);
+      sendPeerMessage(conn, { type: "OFFER", config: live.config, ready }); syncLive(live);
     } catch (error) { if (generation === generationRef.current) setLastError(String(error)); }
     finally { if (preparationRef.current === preparation) preparationRef.current = null; }
   }
@@ -1003,7 +1072,7 @@ export default function App() {
           <section style={styles.panel}>
             <h2 style={styles.h2}>Transcript export</h2>
             <div style={styles.sub}>
-              {packets.length} packets · {canonicalFrames.length} canonical frames · head {short(finalFrameHash, 18)}
+              {packetCount} packets · {canonicalFrameCount} canonical frames · head {short(finalFrameHash, 18)}
             </div>
             <div style={styles.row}>
               <button style={styles.smallButton} onClick={() => void exportTranscript(true)}>

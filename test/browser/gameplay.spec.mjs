@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { auth, record } from "../fixtures/genesis.mjs";
 
 async function developerMode(page) {
@@ -19,6 +19,46 @@ async function browserVerify(page, transcript) {
     const { verifyTranscript } = await import("/src/verifier.ts");
     return verifyTranscript(value);
   }, transcript);
+}
+
+async function emulateBackgroundTab(page) {
+  await page.addInitScript(() => {
+    const nativeRaf = window.requestAnimationFrame.bind(window);
+    const nativeCancelRaf = window.cancelAnimationFrame.bind(window);
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    const queued = new Map();
+    let nextId = -1;
+    let hidden = true;
+    let throttleTimers = false;
+    // Some real tab/window arrangements remain visibilityState=visible while
+    // losing focus and receiving background scheduling treatment.
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.hasFocus = () => !hidden;
+    window.requestAnimationFrame = callback => {
+      if (!hidden) return nativeRaf(callback);
+      const id = nextId--;
+      queued.set(id, callback);
+      return id;
+    };
+    window.cancelAnimationFrame = id => {
+      if (!queued.delete(id)) nativeCancelRaf(id);
+    };
+    window.setTimeout = (callback, delay = 0, ...args) =>
+      nativeSetTimeout(callback, throttleTimers ? Math.max(Number(delay), 1_000) : delay, ...args);
+    window.__throttleCryptoFighterBackgroundTimers = () => { throttleTimers = true; };
+    window.__resumeCryptoFighterTab = () => {
+      hidden = false;
+      throttleTimers = false;
+      document.dispatchEvent(new Event('visibilitychange'));
+      for (const callback of queued.values()) nativeRaf(callback);
+      queued.clear();
+    };
+  });
+}
+
+async function emulateFocusedTab(page) {
+  await page.addInitScript(() => { document.hasFocus = () => true; });
 }
 
 test("generated terminal replay agrees in browser and CLI; transaction controls are absent", async ({ page }, testInfo) => {
@@ -102,6 +142,8 @@ test("two real browser peers finish an idle round with identical complete histor
   test.setTimeout(120_000);
   const host = await context.newPage();
   const joiner = await context.newPage();
+  await emulateFocusedTab(host);
+  await emulateBackgroundTab(joiner);
   const errors = [];
   for (const page of [host, joiner]) page.on("pageerror", (error) => errors.push(error.message));
   await Promise.all([host.goto("/"), joiner.goto("/")]);
@@ -113,10 +155,39 @@ test("two real browser peers finish an idle round with identical complete histor
   await joiner.getByPlaceholder("Paste host peer ID in joiner tab").fill(await host.getByTestId("peer-id").innerText());
   await joiner.getByRole("button", { name: "Connect", exact: true }).click();
   for (const page of [host, joiner]) await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  expect(await joiner.evaluate(() => document.visibilityState)).toBe('visible');
+  expect(await joiner.evaluate(() => document.hasFocus())).toBe(false);
+  await joiner.evaluate(() => window.__throttleCryptoFighterBackgroundTimers());
+  const liveStartedAt = Date.now();
   await host.getByRole("button", { name: "Start Match", exact: true }).click();
+  await expect(host.getByText("300 / 300", { exact: true })).toBeVisible({ timeout: 45_000 });
+  await joiner.evaluate(() => window.__resumeCryptoFighterTab());
+  await expect(joiner.getByText("300 / 300", { exact: true })).toBeVisible({ timeout: 5_000 });
   for (const page of [host, joiner]) {
-    await expect(page.getByText("300 / 300", { exact: true })).toBeVisible({ timeout: 45_000 });
     await developerMode(page);
+  }
+  // Master regressed to roughly 22.6s for this nominal 10s round. Keep enough
+  // headroom for shared CI while preventing the slow-motion path from returning.
+  expect(Date.now() - liveStartedAt).toBeLessThan(18_000);
+  const performanceReports = await Promise.all([host, joiner].map(page => page.evaluate(() => window.__cryptoFighterPerformance)));
+  for (const [index, report] of performanceReports.entries()) {
+    expect(report.slot).toBe(index + 1);
+    expect(report.metrics.frameGap.count).toBe(300);
+    for (const metric of [
+      'signing', 'signatureVerification', 'indexedDbCommit', 'queueWait',
+      'packetDelivery', 'missingInputWait', 'simulationAdvancement',
+    ]) expect(report.metrics[metric].count).toBeGreaterThan(0);
+    // Guard frame cadence itself: a fast total duration can still conceal the
+    // observed pause followed by several catch-up frames.
+    expect(report.metrics.frameGap.p95).toBeLessThan(85);
+    expect(report.pauses.filter(pause => pause.frame > 3).length).toBeLessThan(25);
+    // Rebuilding and cloning the full packet chain here regresses to ~5 ms p95
+    // and creates increasing scheduler debt late in a round.
+    expect(report.metrics.packetChainValidation.p95).toBeLessThan(2);
+    await testInfo.attach(`player-${index + 1}-live-performance.json`, {
+      body: JSON.stringify(report, null, 2), contentType: 'application/json',
+    });
+    await writeFile(testInfo.outputPath(`player-${index + 1}-live-performance.json`), JSON.stringify(report, null, 2));
   }
   const a = await exportTranscript(host);
   const b = await exportTranscript(joiner);
@@ -129,7 +200,6 @@ test("two real browser peers finish an idle round with identical complete histor
     expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
     const file = testInfo.outputPath(`${name}.json`);
-    const { writeFile } = await import("node:fs/promises");
     await writeFile(file, JSON.stringify(transcript));
     const cli = JSON.parse(execFileSync(process.execPath, ["tools/verify-match.mjs", file], { encoding: "utf8" }));
     expect(cli.replay).toEqual(result.replay);
@@ -141,7 +211,6 @@ test("two real browser peers finish an idle round with identical complete histor
   expect(artifact.reconstruction.status).toBe("complete");
   expect(artifact.reconstruction.transcript).toEqual(a);
   const archiveFile = testInfo.outputPath("live-archive.json");
-  const { writeFile } = await import("node:fs/promises");
   await writeFile(archiveFile, JSON.stringify(artifact.archive));
   const rebuilt = execFileSync(process.execPath, ["tools/evidence-trace.mjs", "build", archiveFile], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   expect(rebuilt.trim()).toBe(artifactText);

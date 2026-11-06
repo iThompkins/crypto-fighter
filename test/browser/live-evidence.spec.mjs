@@ -89,6 +89,48 @@ test('IndexedDB commits are atomic across tabs and recovered rows reject tamperi
   expect(result.rejected).toBe(true);
 });
 
+test('per-journal IndexedDB layout preserves legacy evidence as inspection-only', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const name = 'legacy-evidence-migration-test', context = 'legacy-context', orphan = 'orphan-context';
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open(name, 1);
+      request.onupgradeneeded = () => {
+        const events = request.result.createObjectStore('events', { autoIncrement: true });
+        events.createIndex('context', 'context');
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result, tx = db.transaction('events', 'readwrite');
+        tx.objectStore('events').add({ context, event: { kind: 'legacy-row' } });
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => reject(tx.error);
+      };
+    });
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open(`${name}:journal:${orphan}`, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('events', { autoIncrement: true });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result, tx = db.transaction('events', 'readwrite');
+        tx.objectStore('events').add({ kind: 'orphan-row' });
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => reject(tx.error);
+      };
+    });
+    const { BrowserEvidenceStore } = await import('/src/evidence-store.ts');
+    const store = new BrowserEvidenceStore(name);
+    let duplicateRejected = false;
+    try { await store.initialize(context, { kind: 'replacement' }); } catch { duplicateRejected = true; }
+    return { contexts: await store.contexts(), rows: await store.read(context), orphanRows: await store.read(orphan), duplicateRejected };
+  });
+  expect(result.contexts).toContain('legacy-context');
+  expect(result.contexts).toContain('orphan-context');
+  expect(result.rows).toEqual([{ kind: 'legacy-row' }]);
+  expect(result.orphanRows).toEqual([{ kind: 'orphan-row' }]);
+  expect(result.duplicateRejected).toBe(true);
+});
+
 test('browser verifies locally read escrow delegation before authenticated live play', async ({ context }) => {
   const { Interface } = await import('ethers');
   const { GENESIS_ABI } = await import('../../src/genesis.ts');
