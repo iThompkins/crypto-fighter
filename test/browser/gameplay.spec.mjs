@@ -30,8 +30,11 @@ async function emulateBackgroundTab(page) {
     let nextId = -1;
     let hidden = true;
     let throttleTimers = false;
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+    // Some real tab/window arrangements remain visibilityState=visible while
+    // losing focus and receiving background scheduling treatment.
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.hasFocus = () => !hidden;
     window.requestAnimationFrame = callback => {
       if (!hidden) return nativeRaf(callback);
       const id = nextId--;
@@ -52,6 +55,10 @@ async function emulateBackgroundTab(page) {
       queued.clear();
     };
   });
+}
+
+async function emulateFocusedTab(page) {
+  await page.addInitScript(() => { document.hasFocus = () => true; });
 }
 
 test("generated terminal replay agrees in browser and CLI; transaction controls are absent", async ({ page }, testInfo) => {
@@ -135,6 +142,7 @@ test("two real browser peers finish an idle round with identical complete histor
   test.setTimeout(120_000);
   const host = await context.newPage();
   const joiner = await context.newPage();
+  await emulateFocusedTab(host);
   await emulateBackgroundTab(joiner);
   const errors = [];
   for (const page of [host, joiner]) page.on("pageerror", (error) => errors.push(error.message));
@@ -147,7 +155,8 @@ test("two real browser peers finish an idle round with identical complete histor
   await joiner.getByPlaceholder("Paste host peer ID in joiner tab").fill(await host.getByTestId("peer-id").innerText());
   await joiner.getByRole("button", { name: "Connect", exact: true }).click();
   for (const page of [host, joiner]) await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-  expect(await joiner.evaluate(() => document.visibilityState)).toBe('hidden');
+  expect(await joiner.evaluate(() => document.visibilityState)).toBe('visible');
+  expect(await joiner.evaluate(() => document.hasFocus())).toBe(false);
   await joiner.evaluate(() => window.__throttleCryptoFighterBackgroundTimers());
   const liveStartedAt = Date.now();
   await host.getByRole("button", { name: "Start Match", exact: true }).click();

@@ -36,7 +36,7 @@ function createPeer() {
 
 function sendPeerMessage(conn: DataConnection, message: unknown) {
   if (object(message) && message.type === "INPUT") {
-    conn.send({ type: "TIMED_INPUT", sentAt: Date.now(), visibility: document.visibilityState, message });
+    conn.send({ type: "TIMED_INPUT", sentAt: Date.now(), focused: document.hasFocus(), visibility: document.visibilityState, message });
   } else conn.send(message);
 }
 
@@ -300,20 +300,20 @@ export default function App() {
       if (queued >= 128) return;
       queued++;
       let wireValue = raw;
-      let visibleSender = false;
-      if (object(raw) && raw.type === "TIMED_INPUT" && Object.keys(raw).sort().join() === "message,sentAt,type,visibility" &&
-          Number.isFinite(raw.sentAt) && (raw.visibility === "visible" || raw.visibility === "hidden") &&
+      let focusedSender = false;
+      if (object(raw) && raw.type === "TIMED_INPUT" && Object.keys(raw).sort().join() === "focused,message,sentAt,type,visibility" &&
+          Number.isFinite(raw.sentAt) && typeof raw.focused === "boolean" && (raw.visibility === "visible" || raw.visibility === "hidden") &&
           object(raw.message) && raw.message.type === "INPUT") {
         const deliveryMs = Date.now() - Number(raw.sentAt);
         if (deliveryMs >= 0 && deliveryMs <= 60_000) liveRef.current?.recordPacketDelivery(deliveryMs);
-        visibleSender = raw.visibility === "visible";
+        focusedSender = raw.focused;
         wireValue = raw.message;
       }
       const value = structuredClone(wireValue);
       admissionRef.current = admissionRef.current.then(async () => {
         if (!current()) return;
         liveRef.current?.recordConnectionQueueWait(performance.now() - receivedAt);
-        await handleNetMessage(value, current, visibleSender);
+        await handleNetMessage(value, current, focusedSender);
       }).catch(e => { if (current()) { setLastError(String(e)); if (liveRef.current) syncLive(liveRef.current); } }).finally(() => { queued--; });
     });
     conn.on("close", () => {
@@ -342,7 +342,7 @@ export default function App() {
     }
   }
 
-  async function handleNetMessage(raw: unknown, current: () => boolean, visibleSender = false) {
+  async function handleNetMessage(raw: unknown, current: () => boolean, focusedSender = false) {
     if (!object(raw) || typeof raw.type !== "string") throw new Error("Invalid envelope");
     if (raw.type === "CHALLENGE") {
       if (Object.keys(raw).sort().join() !== "nonce,type" || !hex(raw.nonce, 32)) throw new Error("Invalid discovery challenge");
@@ -409,10 +409,10 @@ export default function App() {
     if (!live) throw new Error("No admitted live match");
     const outbound = await live.receive(raw);
     if (!current()) return;
-    // A visible peer remains the real-time clock. A hidden peer responds to its
-    // signed input events because background-tab timers are heavily throttled.
-    // If both peers are hidden, neither reports visible and the match pauses.
-    if (raw.type === "INPUT" && visibleSender && document.visibilityState === "hidden") {
+    // The focused peer remains the real-time clock. Its unfocused counterpart
+    // responds to signed input events because background-tab timers are heavily
+    // throttled. Two focused peers use their normal timers and do not ping-pong.
+    if (raw.type === "INPUT" && focusedSender && !document.hasFocus()) {
       outbound.push(...await live.tick(currentLocalInputMask()));
       if (!current()) return;
     }
