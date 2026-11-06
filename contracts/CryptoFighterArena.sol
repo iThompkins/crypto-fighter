@@ -29,7 +29,6 @@ contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
         address anteToken;
         uint256 anteAmount;
         uint256 rewardAmount;
-        bytes32 rewardReservationId;
         uint64 createdAt;
         uint64 joinedAt;
         uint64 gameDeadline;
@@ -143,7 +142,6 @@ contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
         challengeId = nextChallengeId++;
         uint256 rewardAmount = BASE_REWARD;
         if (ranked) (, rewardAmount,) = rankedPolicy.prepareOffer(challengeId, msg.sender, expectedOpponent);
-        bytes32 reservationId = keccak256(abi.encode(address(this), challengeId, matchId));
         challengeForGenesis[matchId] = challengeId;
         challenges[challengeId] = Challenge({
             p1: msg.sender,
@@ -151,7 +149,6 @@ contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
             anteToken: anteToken,
             anteAmount: anteAmount,
             rewardAmount: rewardAmount,
-            rewardReservationId: reservationId,
             createdAt: uint64(block.timestamp),
             joinedAt: 0,
             gameDeadline: 0,
@@ -166,7 +163,6 @@ contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
             result: SettlementResult.None
         });
 
-        cfcVault.reserveReward(reservationId, rewardAmount);
         _depositAnte(anteToken, matchId, msg.sender, anteAmount);
 
         emit ChallengeCreated(
@@ -219,7 +215,6 @@ contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
         c.status = MatchStatus.Cancelled;
         if (c.ranked) rankedPolicy.releaseOpenOffer(challengeId, c.p1);
         _creditAnte(c, c.p1);
-        cfcVault.releaseReward(c.rewardReservationId);
         emit ChallengeCancelled(challengeId);
     }
 
@@ -232,7 +227,6 @@ contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
         if (c.ranked) rankedPolicy.releaseJoinedMatch(challengeId, c.p1, c.p2);
         _creditAnte(c, c.p1);
         _creditAnte(c, c.p2);
-        cfcVault.releaseReward(c.rewardReservationId);
         emit UnactivatedMatchRefunded(challengeId);
     }
 
@@ -285,16 +279,15 @@ contract CryptoFighterArena is TraceDispute, ReentrancyGuard {
             winner = c.p1;
             _creditAnte(c, c.p1);
             _forfeitAnte(c, c.p2);
-            cfcVault.creditReward(c.rewardReservationId, c.p1);
+            cfcVault.mintGameplayReward(c.matchId, c.p1, c.rewardAmount);
         } else if (result == SettlementResult.P2Win) {
             winner = c.p2;
             _forfeitAnte(c, c.p1);
             _creditAnte(c, c.p2);
-            cfcVault.creditReward(c.rewardReservationId, c.p2);
+            cfcVault.mintGameplayReward(c.matchId, c.p2, c.rewardAmount);
         } else {
             _forfeitAnte(c, c.p1);
             _forfeitAnte(c, c.p2);
-            cfcVault.releaseReward(c.rewardReservationId);
         }
         emit MatchSettled(id, result, winner);
     }

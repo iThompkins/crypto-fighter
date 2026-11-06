@@ -15,11 +15,12 @@ putting the whole match on a blockchain? The implemented answer is:
 3. narrow two conflicting timelines to one game step; and
 4. recalculate that one step in a contract.
 
-That is where the system stops today. It can record which proposed version of a
-disputed step follows the game rules. It does not yet turn that answer into a
-payout, refund, or penalty. Everything involving contracts is restricted to a
-local Hardhat test chain, the browser sends no contract transactions, and this
-project must not be used with real funds.
+The local settlement layer can then keep the surviving trace open for a final
+response window and apply the accepted winner, draw, or no-result policy to
+escrow, streaks, treasury, and protocol-minted rewards. Everything involving
+contracts remains restricted to a local Hardhat test chain. The browser can
+create or join local offers but does not submit settlement transactions, and
+this project must not be used with real funds.
 
 ## The story of one match
 
@@ -171,18 +172,19 @@ challenger's matches, or `Neither` if neither does. These labels answer only,
 “Which proposed next checkpoint follows the rules?” They do not decide who
 deserves money, and they do not prove every other step in either history.
 
-### 9. The implemented system stops at adjudication
+### 9. A surviving trace can settle after a response window
 
-Today the project can authenticate the match, retain public evidence,
-reconstruct a conflict-free history, commit to a trace, narrow two different
-traces to one transition, and calculate the correct result of that transition.
-That is adjudication: deciding what happened at the isolated game step.
+An isolated verdict is not immediate economic finality. It corrects the
+surviving trace and opens another fixed response window so the opponent can
+challenge a different transition. If a terminal claim survives, anyone may
+finalize it. The arena atomically returns the winner's ante, forfeits the loser
+ante to treasury, updates ranked streaks, and mints the immutable CFC reward
+into the winner's pull credit. Draw and no-result outcomes mint nothing. Open
+offers and joined matches that never activate have separate refund exits.
 
-Settlement is later work. The project has no approved rules saying how a trace
-verdict affects deposits, what an unchallenged claim means, what happens when a
-player does not respond, or how every funded match eventually pays out or
-refunds. A correct technical verdict is therefore deliberately disconnected
-from economic consequences.
+The browser prepares evidence and can fund or join local offers, but claim,
+dispute, deadline, and withdrawal transactions still require an external
+wallet/tool. A one-step verdict by itself never transfers value.
 
 ## What is built today
 
@@ -197,11 +199,12 @@ from economic consequences.
   conflicting branch.
 - Fixed-length traces, Merkle roots, and proofs for individual checkpoints.
 - A local contract dispute that bisects two traces and recalculates one step.
-- A local-only owner-issued CFC ERC-20 and segregated vault for available and
-  reserved rewards, active CFC escrow, player credits, and settled treasury.
+- A local-only inflationary CFC ERC-20 with separate administrative issuance and
+  settlement-authorized gameplay minting into player credits, plus segregated
+  active escrow and settled treasury accounting.
 - Local-only CFC/approved-token match funding with 24-hour game and dispute
   windows, permissionless timeout progression, and pull-based settlement.
-- Same-streak ranked CFC offers with exact 1 CFC antes, prefunded Fibonacci
+- Same-streak ranked CFC offers with exact 1 CFC antes, protocol-minted Fibonacci
   rewards, single-active-match locks, and terminal streak updates.
 
 ## What is not built today
@@ -239,7 +242,7 @@ the exact [`matchContextHash` lifecycle](PROTOCOL_BOUNDARY.md#matchcontexthash-l
 | Trace creation | [`src/evidence-trace.ts`](../src/evidence-trace.ts), [`src/execution-trace.ts`](../src/execution-trace.ts) | Checkpoints, roots, proofs, and dispute-ready evidence. |
 | Trace disagreement | [`src/bisection.ts`](../src/bisection.ts), [`contracts/TraceDispute.sol`](../contracts/TraceDispute.sol) | Midpoint comparison, deadlines, and the neutral verdict. |
 | One-step calculation | [`contracts/GameTransitionVerifier.sol`](../contracts/GameTransitionVerifier.sol), [`src/onchain-dispute.ts`](../src/onchain-dispute.ts) | Contract game rules and preparation of the isolated-step data. |
-| Token accounting | [`contracts/CryptoFighterCoin.sol`](../contracts/CryptoFighterCoin.sol), [`contracts/CryptoFighterVault.sol`](../contracts/CryptoFighterVault.sol), [`contracts/CryptoFighterTokenEscrow.sol`](../contracts/CryptoFighterTokenEscrow.sol), [`CFC_MONETARY_POLICY.md`](CFC_MONETARY_POLICY.md) | Owner-issued CFC, prefunded reward reservations, CFC/approved-token escrow, pull credits, settled treasury, and future owner/DAO handoff primitives connected to the local arena. |
+| Token accounting | [`contracts/CryptoFighterCoin.sol`](../contracts/CryptoFighterCoin.sol), [`contracts/CryptoFighterVault.sol`](../contracts/CryptoFighterVault.sol), [`contracts/CryptoFighterTokenEscrow.sol`](../contracts/CryptoFighterTokenEscrow.sol), [`CFC_MONETARY_POLICY.md`](CFC_MONETARY_POLICY.md) | Separate administrative and gameplay CFC issuance, CFC/approved-token escrow, pull credits, settled treasury, issuance counters, and future owner/DAO handoff primitives connected to the local arena. |
 | Evidence and chain trust | [`EVIDENCE_AND_CHAIN_TRUST.md`](EVIDENCE_AND_CHAIN_TRUST.md), [`PHASE_B.md`](PHASE_B.md), [`PHASE_C.md`](PHASE_C.md) | Required evidence, retention responsibility, availability failures, RPC/finality assumptions, and reorg handling. |
 | Safety boundary | [`PROTOCOL_BOUNDARY.md`](PROTOCOL_BOUNDARY.md), [`INVARIANTS.md`](INVARIANTS.md), [`ROADMAP.md`](ROADMAP.md) | Current/legacy API status, rules changes must preserve, and work that remains. |
 

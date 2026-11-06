@@ -51,7 +51,7 @@ async function setup(asset = "cfc", options = {}) {
     anteAmount = 1_000_000n;
     await ctx.tokenEscrow.configureAsset(await anteToken.getAddress(), anteAmount, true);
     for (const player of [p1, p2]) {
-      await anteToken.mint(player.address, anteAmount);
+      await anteToken.mintAdministrative(player.address, anteAmount);
       await anteToken.connect(player).approve(await ctx.tokenEscrow.getAddress(), anteAmount);
     }
   }
@@ -92,13 +92,17 @@ async function finalizeUnchallenged(m, outcome) {
 describe("24-hour token settlement", function () {
   it("returns a CFC winner's ante, credits the reward, and forfeits the loser ante once", async function () {
     const m = await setup();
+    const supplyBefore = await m.coin.totalSupply();
     await finalizeUnchallenged(m, 1);
     assert.equal((await m.arena.getChallenge(1)).status, 4n);
     assert.equal((await m.arena.getChallenge(1)).result, 1n);
     assert.equal(await m.vault.playerCredits(m.p1.address), 2n * CFC);
     assert.equal(await m.vault.settledTreasury(), CFC);
     assert.equal(await m.vault.totalActiveEscrow(), 0n);
-    assert.equal(await m.vault.totalReservedRewards(), 0n);
+    assert.equal(await m.coin.totalSupply(), supplyBefore + CFC);
+    assert.equal(await m.coin.totalGameplayMinted(), CFC);
+    assert.equal(await m.coin.gameplayRewardIssued(m.matchId), true);
+    assert.equal(await m.vault.gameplayRewards(m.matchId), CFC);
     await rejected(m.arena.finalizeTraceClaim(1), "trace not finalizable");
     const before = await m.coin.balanceOf(m.p1.address);
     await m.vault.connect(m.p1).withdrawCredit(m.p1.address, 2n * CFC);
@@ -107,33 +111,39 @@ describe("24-hour token settlement", function () {
 
   it("settles an approved stablecoin from snapshotted terms after the owner disables it", async function () {
     const m = await setup("stable", { disableBeforeJoin: true });
+    const supplyBefore = await m.coin.totalSupply();
     await finalizeUnchallenged(m, 2);
     const token = await m.anteToken.getAddress();
     assert.equal(await m.tokenEscrow.playerCredits(token, m.p2.address), m.anteAmount);
     assert.equal(await m.tokenEscrow.settledTreasury(token), m.anteAmount);
     assert.equal(await m.tokenEscrow.totalActiveEscrow(token), 0n);
     assert.equal(await m.vault.playerCredits(m.p2.address), CFC);
+    assert.equal(await m.coin.totalSupply(), supplyBefore + CFC);
   });
 
-  it("sends both draw antes to treasury, preserves the reward reserve, and credits nobody", async function () {
+  it("sends both draw antes to treasury and mints no gameplay reward", async function () {
     const m = await setup();
-    const availableAfterReservation = await m.vault.availableRewards();
+    const supplyBefore = await m.coin.totalSupply();
     await finalizeUnchallenged(m, 3);
     assert.equal((await m.arena.getChallenge(1)).result, 3n);
     assert.equal(await m.vault.settledTreasury(), 2n * CFC);
     assert.equal(await m.vault.playerCredits(m.p1.address), 0n);
     assert.equal(await m.vault.playerCredits(m.p2.address), 0n);
-    assert.equal(await m.vault.availableRewards(), availableAfterReservation + CFC);
+    assert.equal(await m.coin.totalSupply(), supplyBefore);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
   });
 
   it("keeps the game deadline inclusive, then permits anyone to execute no-proof settlement", async function () {
     const m = await setup();
+    const supplyBefore = await m.coin.totalSupply();
     const deadline = (await m.arena.getChallenge(1)).gameDeadline;
     await network.provider.send("evm_setNextBlockTimestamp", [Number(deadline)]);
     await rejected(m.arena.connect(m.caller).expireUnclaimedMatch(1), "game window open");
     await m.arena.connect(m.caller).expireUnclaimedMatch(1);
     assert.equal((await m.arena.getChallenge(1)).result, 4n);
     assert.equal(await m.vault.settledTreasury(), 2n * CFC);
+    assert.equal(await m.coin.totalSupply(), supplyBefore);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
     await rejected(m.arena.expireUnclaimedMatch(1), "not active");
   });
 
@@ -148,14 +158,17 @@ describe("24-hour token settlement", function () {
       m.arena.connect(m.p2).challengeTrace(1, challenger.root, malformed, challenger.open(300), challenger.terminal),
       "invalid trace opening"
     );
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
     assert.equal((await m.arena.getTraceGame(1)).deadline, claimDeadline);
     await m.arena.connect(m.p2).challengeTrace(1, challenger.root, challenger.open(0), challenger.open(300), challenger.terminal);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
     const midpointDeadline = (await m.arena.getTraceGame(1)).deadline;
     await m.arena.connect(m.p1).revealMidpoint(1, 0, claimant.open(150));
     assert.equal((await m.arena.getTraceGame(1)).deadline, midpointDeadline);
     await network.provider.send("evm_setNextBlockTimestamp", [Number(midpointDeadline) + 1]);
     await m.arena.connect(m.caller).expireTraceTurn(1);
     assert.equal((await m.arena.getChallenge(1)).result, 1n);
+    assert.equal(await m.coin.totalGameplayMinted(), CFC);
   });
 
   it("settles no result when neither participant answers a bisection turn", async function () {
@@ -169,5 +182,24 @@ describe("24-hour token settlement", function () {
     await m.arena.connect(m.caller).expireTraceTurn(1);
     assert.equal((await m.arena.getChallenge(1)).result, 4n);
     assert.equal(await m.vault.settledTreasury(), 2n * CFC);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
+  });
+
+  it("reverts every settlement state change when gameplay mint authority fails", async function () {
+    const m = await setup();
+    const trace = await traceFor(m, 1, "mint-failure");
+    await m.arena.connect(m.p1).claimTrace(1, trace.root, trace.open(0), trace.open(300), trace.terminal);
+    const deadline = (await m.arena.getTraceGame(1)).deadline;
+    await network.provider.send("evm_setNextBlockTimestamp", [Number(deadline) + 1]);
+    await m.coin.connect(m.owner).beginGameplayAuthorityTransfer(m.caller.address);
+    await m.coin.connect(m.caller).acceptGameplayAuthority();
+
+    await assert.rejects(m.arena.connect(m.caller).finalizeTraceClaim(1), /UnauthorizedGameplayAuthority/);
+    assert.equal((await m.arena.getChallenge(1)).status, 2n);
+    assert.equal((await m.arena.getChallenge(1)).result, 0n);
+    assert.equal(await m.vault.totalActiveEscrow(), 2n * CFC);
+    assert.equal(await m.vault.totalPlayerCredits(), 0n);
+    assert.equal(await m.vault.settledTreasury(), 0n);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
   });
 });

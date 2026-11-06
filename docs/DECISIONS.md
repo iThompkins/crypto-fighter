@@ -104,3 +104,19 @@ mark the old one `Superseded`; do not erase the history.
   economic effect is implemented.
 - **Context:** [protocol boundary](PROTOCOL_BOUNDARY.md#removed-legacy-surface),
   [Issue #9](https://github.com/iThompkins/crypto-fighter/issues/9)
+
+## D-009 — Mint deterministic gameplay rewards at accepted settlement
+
+- **Date:** 2026-11-06
+- **Status:** Accepted
+- **Decision:** CFC has no fixed supply cap. Administrative issuance remains an
+  owner-controlled token operation, while the designated settlement vault alone
+  may request the immutable match reward after a terminal winner is accepted.
+  Ranked rewards follow the snapshotted Fibonacci policy; unranked rewards are
+  one CFC. Draw, no-result, cancellation, and failed activation mint nothing.
+- **Consequence:** Offers no longer depend on prefunded reward inventory.
+  Gameplay minting, winner credit, ante return, loser forfeiture, streak update,
+  and terminal status occur atomically and exactly once. Forfeited antes support
+  treasury accounting; they do not fund rewards or guarantee a token price.
+- **Context:** [CFC monetary policy](CFC_MONETARY_POLICY.md),
+  [protocol boundary](PROTOCOL_BOUNDARY.md#authoritative-current-trace-path)

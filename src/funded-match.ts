@@ -9,7 +9,7 @@ export const FUNDED_ARENA_ABI = [
   "function cfc() view returns (address)",
   "function cfcVault() view returns (address)",
   "function tokenEscrow() view returns (address)",
-  "function getChallenge(uint256 challengeId) view returns (tuple(address p1,address p2,address anteToken,uint256 anteAmount,uint256 rewardAmount,bytes32 rewardReservationId,uint64 createdAt,uint64 joinedAt,uint64 gameDeadline,bytes32 matchId,bytes32 rulesHash,bytes32 matchContextHash,address p1SessionKey,address p2SessionKey,address restrictedOpponent,bool ranked,uint8 status,uint8 result))",
+  "function getChallenge(uint256 challengeId) view returns (tuple(address p1,address p2,address anteToken,uint256 anteAmount,uint256 rewardAmount,uint64 createdAt,uint64 joinedAt,uint64 gameDeadline,bytes32 matchId,bytes32 rulesHash,bytes32 matchContextHash,address p1SessionKey,address p2SessionKey,address restrictedOpponent,bool ranked,uint8 status,uint8 result))",
   "function challenge(bytes32 matchId,bytes32 rulesHash,address p1SessionKey,address expectedOpponent,address anteToken,bool ranked) returns (uint256)",
   "function join(uint256 challengeId,address p2SessionKey)",
   "event ChallengeCreated(uint256 indexed challengeId,address indexed challenger,address indexed anteToken,uint256 anteAmount,uint256 rewardAmount,bool ranked,bytes32 matchId)",
@@ -72,7 +72,6 @@ export async function readFundedOfferPlan(
     if (opponent === ZeroAddress) throw new Error("ranked offers require a named opponent");
     rankedPreview = await readRankedPreview(provider, arenaAddressChecked, player, opponent);
     if (!rankedPreview.eligible) throw new Error("ranked opponent is not currently eligible");
-    if (!rankedPreview.rewardFunded) throw new Error("ranked reward reserve is insufficient");
     anteAmount = CFC;
     rewardCfc = rankedPreview.nextWinRewardCfc;
   } else if (anteToken === cfc) {

@@ -58,7 +58,7 @@ async function joinAndAuthorize(m, match) {
   );
 }
 
-async function finalize(m, match, outcome) {
+async function claim(m, match, outcome) {
   const start = { ...terminalState(0), frame: 0, timer: 300, terminal: false };
   const terminal = terminalState(outcome);
   const points = Array.from({ length: 301 }, (_, index) => checkpoint(ethers.id(`trace-${match.id}-${outcome}-${index}`)));
@@ -66,7 +66,11 @@ async function finalize(m, match, outcome) {
   points[300] = checkpoint(await m.arena.hashTraceState(terminal));
   const trace = tree((await m.arena.getChallenge(match.id)).matchContextHash, points);
   await m.arena.connect(match.p1).claimTrace(match.id, trace.root, trace.open(0), trace.open(300), terminal);
-  const deadline = (await m.arena.getTraceGame(match.id)).deadline;
+  return (await m.arena.getTraceGame(match.id)).deadline;
+}
+
+async function finalize(m, match, outcome) {
+  const deadline = await claim(m, match, outcome);
   await network.provider.send("evm_setNextBlockTimestamp", [Number(deadline) + 1]);
   await m.arena.connect(m.caller).finalizeTraceClaim(match.id);
 }
@@ -103,6 +107,28 @@ describe("Ranked CFC streaks and Fibonacci rewards", function () {
     await customError(m.ranked.fibonacciReward(284), m.ranked, "RewardOverflow");
   });
 
+  it("mints exact successful ranked rewards across the 1, 1, 2 Fibonacci levels", async function () {
+    const signers = await ethers.getSigners();
+    const players = signers.slice(1, 9);
+    const m = { ...(await deployArena(players)), owner: signers[0], caller: signers[9] };
+    let contenders = players;
+    for (const reward of [1n, 1n, 2n]) {
+      const winners = [];
+      for (let index = 0; index < contenders.length; index += 2) {
+        const p1 = contenders[index], p2 = contenders[index + 1];
+        const supplyBefore = await m.coin.totalSupply();
+        const match = await play(m, p1, p2, 1);
+        assert.equal((await m.arena.getChallenge(match.id)).rewardAmount, reward * CFC);
+        assert.equal(await m.coin.totalSupply(), supplyBefore + reward * CFC);
+        assert.equal(await m.vault.gameplayRewards(match.matchId), reward * CFC);
+        winners.push(p1);
+      }
+      contenders = winners;
+    }
+    assert.equal(await m.coin.totalGameplayMinted(), 8n * CFC);
+    assert.equal(await m.ranked.rankedStreak(contenders[0].address), 3n);
+  });
+
   it("snapshots equal streaks, exact 1 CFC risk, reward, and policy version", async function () {
     const m = await fixture();
     const match = await createMatch(m, m.p1, m.p2);
@@ -113,7 +139,7 @@ describe("Ranked CFC streaks and Fibonacci rewards", function () {
     assert.equal(challenge.rewardAmount, CFC);
     assert.equal(offer.startingStreak, 0n);
     assert.equal(offer.policyVersion, 1n);
-    assert.equal(await m.vault.rewardReservations(challenge.rewardReservationId), CFC);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
     assert.equal(await m.ranked.activeRankedMatch(m.p1.address), match.id);
     await customError(
       m.arena.connect(m.p1).challenge(
@@ -128,10 +154,12 @@ describe("Ranked CFC streaks and Fibonacci rewards", function () {
   it("advances only the winner, resets the loser, blocks an ineligible rematch, and settles once", async function () {
     const m = await fixture();
     await buildStreakOnePair(m);
+    const mintedBefore = await m.coin.totalGameplayMinted();
     const decisive = await play(m, m.p1, m.p3, 1);
     assert.equal(await m.ranked.rankedStreak(m.p1.address), 2n);
     assert.equal(await m.ranked.rankedStreak(m.p3.address), 0n);
     assert.equal((await m.ranked.rankedOffers(decisive.id)).rewardAmount, CFC);
+    assert.equal(await m.coin.totalGameplayMinted(), mintedBefore + CFC);
     await customError(
       createMatch(m, m.p1, m.p3),
       m.ranked,
@@ -170,12 +198,53 @@ describe("Ranked CFC streaks and Fibonacci rewards", function () {
     const amount = 1_000_000n;
     await m.tokenEscrow.configureAsset(await stable.getAddress(), amount, true);
     for (const player of [m.p1, m.p3]) {
-      await stable.mint(player.address, amount);
+      await stable.mintAdministrative(player.address, amount);
       await stable.connect(player).approve(await m.tokenEscrow.getAddress(), amount);
     }
     await play(m, m.p1, m.p3, 2, false, stable);
     assert.equal(await m.ranked.rankedStreak(m.p1.address), 1n);
     assert.equal(await m.ranked.rankedStreak(m.p3.address), 1n);
+  });
+
+  it("settles concurrent matches into only their own reward credits", async function () {
+    const m = await fixture();
+    const first = await createMatch(m, m.p1, m.p2, false);
+    const second = await createMatch(m, m.p3, m.p4, false);
+    await joinAndAuthorize(m, first);
+    await joinAndAuthorize(m, second);
+    const firstDeadline = await claim(m, first, 1);
+    const secondDeadline = await claim(m, second, 2);
+    await network.provider.send("evm_setNextBlockTimestamp", [Number(firstDeadline > secondDeadline ? firstDeadline : secondDeadline) + 1]);
+    await m.arena.connect(m.caller).finalizeTraceClaim(first.id);
+    await m.arena.connect(m.caller).finalizeTraceClaim(second.id);
+
+    assert.equal(await m.vault.gameplayRewards(first.matchId), CFC);
+    assert.equal(await m.vault.gameplayRewards(second.matchId), CFC);
+    assert.equal(await m.vault.playerCredits(m.p1.address), 2n * CFC);
+    assert.equal(await m.vault.playerCredits(m.p4.address), 2n * CFC);
+    assert.equal(await m.vault.playerCredits(m.p2.address), 0n);
+    assert.equal(await m.vault.playerCredits(m.p3.address), 0n);
+    assert.equal(await m.coin.totalGameplayMinted(), 2n * CFC);
+  });
+
+  it("rolls back ranked streaks, locks, escrow, and terminal state when minting fails", async function () {
+    const m = await fixture();
+    const match = await createMatch(m, m.p1, m.p2, true);
+    await joinAndAuthorize(m, match);
+    const deadline = await claim(m, match, 1);
+    await network.provider.send("evm_setNextBlockTimestamp", [Number(deadline) + 1]);
+    await m.coin.connect(m.owner).beginGameplayAuthorityTransfer(m.caller.address);
+    await m.coin.connect(m.caller).acceptGameplayAuthority();
+
+    await assert.rejects(m.arena.connect(m.caller).finalizeTraceClaim(match.id), /UnauthorizedGameplayAuthority/);
+    assert.equal((await m.arena.getChallenge(match.id)).status, 2n);
+    assert.equal((await m.ranked.rankedOffers(match.id)).status, 2n);
+    assert.equal(await m.ranked.rankedStreak(m.p1.address), 0n);
+    assert.equal(await m.ranked.rankedStreak(m.p2.address), 0n);
+    assert.equal(await m.ranked.activeRankedMatch(m.p1.address), match.id);
+    assert.equal(await m.ranked.activeRankedMatch(m.p2.address), match.id);
+    assert.equal(await m.vault.totalActiveEscrow(), 2n * CFC);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
   });
 
   it("makes stale offers unjoinable and keeps policy changes future-only", async function () {
@@ -210,18 +279,14 @@ describe("Ranked CFC streaks and Fibonacci rewards", function () {
     assert.equal(await m.ranked.activeRankedMatch(m.p2.address), 0n);
     assert.equal(await m.ranked.rankedStreak(m.p1.address), 0n);
     assert.equal(await m.ranked.rankedStreak(m.p2.address), 0n);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
   });
 
-  it("cannot create without the full reward reserve and pausing does not block existing exits", async function () {
+  it("creates without prefunded rewards and pausing does not block existing exits", async function () {
     const m = await fixture();
-    const available = await m.vault.availableRewards();
-    await m.vault.withdrawAvailableRewards(m.owner.address, available);
-    await assert.rejects(createMatch(m, m.p1, m.p2), /InsufficientAvailableRewards/);
-
-    await m.coin.mint(m.owner.address, 2n * CFC);
-    await m.coin.approve(await m.vault.getAddress(), 2n * CFC);
-    await m.vault.fundRewards(2n * CFC);
+    assert.equal(await m.coin.balanceOf(await m.vault.getAddress()), 0n);
     const existing = await createMatch(m, m.p1, m.p2);
+    assert.equal(await m.coin.totalGameplayMinted(), 0n);
     await m.ranked.setCreationPaused(true);
     await joinAndAuthorize(m, existing);
     await finalize(m, existing, 1);

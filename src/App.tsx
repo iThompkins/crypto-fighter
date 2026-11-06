@@ -624,7 +624,7 @@ export default function App() {
       ? "open opponent" : `opponent ${short(plan.restrictedOpponent, 14)}`;
     const ranked = plan.rankedPreview
       ? `; streak ${plan.rankedPreview.startingStreak}; policy v${plan.rankedPreview.policyVersion}` : "";
-    return `${kind}: ${plan.anteDisplay} token units at risk from ${short(plan.anteToken, 14)}; ${plan.rewardCfc} CFC win reward; ${restriction}${ranked}; ${plan.allowanceRequired ? "exact allowance confirmation required" : "existing allowance sufficient"}.`;
+    return `${kind}: ${plan.anteDisplay} token units at risk from ${short(plan.anteToken, 14)}; ${plan.rewardCfc} CFC protocol-minted win reward; ${restriction}${ranked}; ${plan.allowanceRequired ? "exact allowance confirmation required" : "existing allowance sufficient"}.`;
   }
 
   async function previewFundedCreate() {

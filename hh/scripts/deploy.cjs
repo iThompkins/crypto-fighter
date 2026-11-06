@@ -16,6 +16,8 @@ async function main() {
   const Vault = await ethers.getContractFactory("CryptoFighterVault");
   const vault = await Vault.deploy(await coin.getAddress(), deployer.address, deployer.address);
   await vault.waitForDeployment();
+  await coin.beginGameplayAuthorityTransfer(await vault.getAddress());
+  await vault.acceptGameplayAuthority();
   const TokenEscrow = await ethers.getContractFactory("CryptoFighterTokenEscrow");
   const tokenEscrow = await TokenEscrow.deploy(deployer.address, deployer.address);
   await tokenEscrow.waitForDeployment();
@@ -31,6 +33,7 @@ async function main() {
   await arena.acceptOperatorRoles();
   console.log("CFC_ADDRESS=" + await coin.getAddress());
   console.log("CFC_OWNER=" + await coin.owner());
+  console.log("CFC_GAMEPLAY_AUTHORITY=" + await coin.gameplayAuthority());
   console.log("CFC_VAULT_ADDRESS=" + await vault.getAddress());
   console.log("CFC_VAULT_OWNER=" + await vault.owner());
   console.log("CFC_VAULT_OPERATOR=" + await vault.operator());

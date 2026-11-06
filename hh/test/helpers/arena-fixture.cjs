@@ -8,6 +8,8 @@ async function deployArena(players = []) {
   const coin = await Coin.deploy(owner.address);
   const Vault = await ethers.getContractFactory("CryptoFighterVault");
   const vault = await Vault.deploy(await coin.getAddress(), owner.address, owner.address);
+  await coin.beginGameplayAuthorityTransfer(await vault.getAddress());
+  await vault.acceptGameplayAuthority();
   const TokenEscrow = await ethers.getContractFactory("CryptoFighterTokenEscrow");
   const tokenEscrow = await TokenEscrow.deploy(owner.address, owner.address);
   const Ranked = await ethers.getContractFactory("CryptoFighterRanked");
@@ -20,17 +22,13 @@ async function deployArena(players = []) {
   await ranked.beginOperatorTransfer(await arena.getAddress());
   await arena.acceptOperatorRoles();
 
-  const rewardFunding = ethers.parseEther("1000");
-  await coin.mint(owner.address, rewardFunding);
-  await coin.approve(await vault.getAddress(), rewardFunding);
-  await vault.fundRewards(rewardFunding);
   for (const player of players) await fundCfc({ coin, vault }, player);
   return { owner, coin, vault, tokenEscrow, ranked, arena };
 }
 
 async function fundCfc({ coin, vault }, player, amount = ethers.parseEther("100")) {
   const owner = (await ethers.getSigners())[0];
-  await coin.connect(owner).mint(player.address, amount);
+  await coin.connect(owner).mintAdministrative(player.address, amount);
   await coin.connect(player).approve(await vault.getAddress(), amount);
 }
 

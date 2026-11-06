@@ -70,7 +70,7 @@ describe("Funded browser match transactions", function () {
     const stable = await (await ethers.getContractFactory("CryptoFighterCoin")).deploy(m.owner.address);
     const ante = 1_000_000n;
     await m.tokenEscrow.configureAsset(await stable.getAddress(), ante, true);
-    await stable.mint(m.p1.address, ante);
+    await stable.mintAdministrative(m.p1.address, ante);
     await stable.connect(m.p1).approve(await m.tokenEscrow.getAddress(), 0);
     const arena = await m.arena.getAddress();
     const plan = await funded.readFundedOfferPlan(

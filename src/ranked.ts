@@ -2,10 +2,8 @@ import { Contract, formatUnits, getAddress, type Provider } from "ethers";
 
 export const RANKED_ARENA_ABI = [
   "function rankedPolicy() view returns (address)",
-  "function cfcVault() view returns (address)",
 ] as const;
 
-export const RANKED_VAULT_ABI = ["function availableRewards() view returns (uint256)"] as const;
 export const RANKED_POLICY_ABI = [
   "function eligibility(address p1,address p2) view returns (bool eligible,uint256 startingStreak,uint256 rewardAmount,uint64 policyVersion)",
   "function rankedOffers(uint256 challengeId) view returns (address p1,address p2,uint256 startingStreak,uint256 rewardAmount,uint64 policyVersion,uint8 status,uint8 result)",
@@ -13,7 +11,6 @@ export const RANKED_POLICY_ABI = [
 
 export type RankedPreview = {
   eligible: boolean;
-  rewardFunded: boolean;
   startingStreak: string;
   anteCfc: "1";
   nextWinRewardCfc: string;
@@ -26,8 +23,7 @@ export type RankedOutcome = {
 
 export function rankedPreviewText(preview: RankedPreview): string {
   const opponent = preview.eligible ? "same-rank opponent eligible" : "opponent not currently eligible";
-  const reserve = preview.rewardFunded ? "reward reserved on confirmation" : "reward reserve currently insufficient";
-  return `Ranked: exactly 1 CFC at risk; streak ${preview.startingStreak}; next win pays ${preview.nextWinRewardCfc} CFC; ${opponent}; ${reserve}; policy v${preview.policyVersion}.`;
+  return `Ranked: exactly 1 CFC at risk; streak ${preview.startingStreak}; next accepted win mints ${preview.nextWinRewardCfc} CFC; ${opponent}; protocol-issued reward; policy v${preview.policyVersion}.`;
 }
 
 export async function readRankedPreview(
@@ -38,18 +34,12 @@ export async function readRankedPreview(
 ): Promise<RankedPreview> {
   const arena = new Contract(getAddress(arenaAddress), RANKED_ARENA_ABI, provider);
   const blockTag = await provider.getBlockNumber();
-  const [rankedAddress, vaultAddress] = await Promise.all([
-    arena.rankedPolicy({ blockTag }),
-    arena.cfcVault({ blockTag }),
-  ]);
+  const rankedAddress = await arena.rankedPolicy({ blockTag });
   const ranked = new Contract(getAddress(rankedAddress), RANKED_POLICY_ABI, provider);
   const eligibility = await ranked.eligibility(getAddress(p1), getAddress(p2), { blockTag });
-  const vault = new Contract(getAddress(vaultAddress), RANKED_VAULT_ABI, provider);
-  const available = BigInt(await vault.availableRewards({ blockTag }));
   const reward = BigInt(eligibility.rewardAmount);
   return {
     eligible: eligibility.eligible,
-    rewardFunded: eligibility.eligible && available >= reward,
     startingStreak: eligibility.startingStreak.toString(),
     anteCfc: "1",
     nextWinRewardCfc: formatUnits(reward, 18),

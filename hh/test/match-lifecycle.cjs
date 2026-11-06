@@ -46,7 +46,7 @@ describe("CryptoFighterArena match lifecycle", function () {
     assert.equal(challenge.rewardAmount, CFC);
     assert.equal(challenge.restrictedOpponent, p2.address);
     assert.equal(await vault.totalActiveEscrow(), CFC);
-    assert.equal(await vault.totalReservedRewards(), CFC);
+    assert.equal(await coin.totalGameplayMinted(), 0n);
   });
 
   it("enforces join identity, session-key, and opponent constraints", async function () {
@@ -82,7 +82,7 @@ describe("CryptoFighterArena match lifecycle", function () {
     await arena.connect(p1).cancelOpenChallenge(1);
     assert.equal(await vault.playerCredits(p1.address), CFC);
     assert.equal(await vault.totalActiveEscrow(), 0n);
-    assert.equal(await vault.totalReservedRewards(), 0n);
+    assert.equal(await coin.totalGameplayMinted(), 0n);
     assert.equal((await arena.getChallenge(1)).status, 3n);
     await rejected(arena.connect(p1).cancelOpenChallenge(1), "not open");
   });

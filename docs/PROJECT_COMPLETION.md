@@ -15,11 +15,13 @@ disabled. The [protocol-boundary guide](PROTOCOL_BOUNDARY.md) classifies the cur
 - On-chain fixed-root claim/challenge and authenticated midpoint bisection.
 - Independent Solidity state validation and one-step execution, including terminal absorption.
 - Claimant/challenger/neither adjudication with correction and timeout progression.
-- CFC and approved-token escrow with pull credits, settled treasury, and prefunded rewards.
+- CFC and approved-token escrow with pull credits, settled treasury, and
+  settlement-authorized protocol-minted rewards.
 - Separate objective records for signed invalid input and equivocation.
 - Participant root-to-journal integrity commitments without availability claims.
 - Phase C-to-contract claim, midpoint, and adjudication witness preparation.
-- Developer-mode browser witness preparation; the browser has no contract transaction actions.
+- Developer-mode browser witness preparation and local funded create/join
+  transactions; settlement transaction actions remain external.
 
 ## Architecture and security invariants
 

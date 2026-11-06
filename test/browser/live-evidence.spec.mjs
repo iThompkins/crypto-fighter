@@ -172,13 +172,12 @@ test('browser verifies locally read escrow delegation before authenticated live 
 test('funded offer preview shows exact risk, eligibility, reward, spender and recoverable approval', async ({ page }) => {
   const { Interface } = await import('ethers');
   const { FUNDED_ARENA_ABI } = await import('../../src/funded-match.ts');
-  const { RANKED_POLICY_ABI, RANKED_VAULT_ABI } = await import('../../src/ranked.ts');
+  const { RANKED_POLICY_ABI } = await import('../../src/ranked.ts');
   const arena = '0x' + 'aa'.repeat(20), ranked = '0x' + 'bb'.repeat(20), vault = '0x' + 'cc'.repeat(20);
   const cfc = '0x' + 'dd'.repeat(20), tokenEscrow = '0x' + 'ee'.repeat(20);
   const p1 = '0x' + '11'.repeat(20), p2 = '0x' + '22'.repeat(20);
   const arenaInterface = new Interface([...FUNDED_ARENA_ABI, 'function rankedPolicy() view returns (address)']);
   const rankedInterface = new Interface(RANKED_POLICY_ABI);
-  const vaultInterface = new Interface(RANKED_VAULT_ABI);
   const tokenInterface = new Interface([
     'function allowance(address owner,address spender) view returns (uint256)',
     'function decimals() view returns (uint8)',
@@ -189,7 +188,6 @@ test('funded offer preview shows exact risk, eligibility, reward, spender and re
     [arenaInterface.getFunction('cfcVault').selector]: arenaInterface.encodeFunctionResult('cfcVault', [vault]),
     [arenaInterface.getFunction('tokenEscrow').selector]: arenaInterface.encodeFunctionResult('tokenEscrow', [tokenEscrow]),
     [rankedInterface.getFunction('eligibility').selector]: rankedInterface.encodeFunctionResult('eligibility', [true, 8, 34n * 10n ** 18n, 3]),
-    [vaultInterface.getFunction('availableRewards').selector]: vaultInterface.encodeFunctionResult('availableRewards', [100n * 10n ** 18n]),
     [tokenInterface.getFunction('allowance').selector]: tokenInterface.encodeFunctionResult('allowance', [0]),
     [tokenInterface.getFunction('decimals').selector]: tokenInterface.encodeFunctionResult('decimals', [18]),
   };
@@ -212,7 +210,7 @@ test('funded offer preview shows exact risk, eligibility, reward, spender and re
   await page.getByText('Ranked offer (1 CFC ante; named equal-streak opponent)').click();
   await page.getByRole('button', { name: 'Preview create terms', exact: true }).click();
   await expect(page.getByText(/Ranked CFC: 1.0 token units at risk/)).toBeVisible();
-  await expect(page.getByText(/34.0 CFC win reward.*streak 8; policy v3; exact allowance confirmation required/)).toBeVisible();
+  await expect(page.getByText(/34.0 CFC protocol-minted win reward.*streak 8; policy v3; exact allowance confirmation required/)).toBeVisible();
   const submit = page.getByRole('button', { name: 'Create funded offer', exact: true });
   await expect(submit).toBeEnabled();
   await submit.click();
@@ -291,7 +289,7 @@ test('joining an open funded offer previews chain terms and commits the current 
     'function decimals() view returns (uint8)',
   ]);
   const challenge = [
-    p1, ZeroAddress, cfc, 10n ** 18n, 10n ** 18n, '0x' + '01'.repeat(32),
+    p1, ZeroAddress, cfc, 10n ** 18n, 10n ** 18n,
     1, 0, 0, '0x' + '02'.repeat(32), '0x' + '03'.repeat(32), '0x' + '00'.repeat(32),
     '0x' + '44'.repeat(20), ZeroAddress, p2, false, 1, 0,
   ];
@@ -332,7 +330,7 @@ test('joining an open funded offer previews chain terms and commits the current 
   await page.getByPlaceholder('Arena contract address (0x...)').fill(arena);
   await page.getByPlaceholder('Challenge id', { exact: true }).fill('7');
   await page.getByRole('button', { name: 'Preview join terms', exact: true }).click();
-  await expect(page.getByText(/Unranked: 1.0 token units at risk.*1.0 CFC win reward/)).toBeVisible();
+  await expect(page.getByText(/Unranked: 1.0 token units at risk.*1.0 CFC protocol-minted win reward/)).toBeVisible();
   await page.getByRole('button', { name: 'Join funded offer', exact: true }).click();
   await expect(page.getByText(/Joined challenge 7; status active; confirmed transaction/)).toBeVisible();
   await page.getByRole('button', { name: 'Preview join terms', exact: true }).click();
